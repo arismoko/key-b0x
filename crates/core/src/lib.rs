@@ -44,10 +44,10 @@ const COORDS_EXT_FIREFOX_MOD_Y: (f64, f64) = (0.3875, 0.9125);
 const LIGHT_SHIELD_VALUE: u8 = 49;
 const MID_SHIELD_VALUE: u8 = 94;
 const TRIGGER_AXIS_MAX: f64 = 255.0;
+const GAMECUBE_STICK_RADIUS: f64 = 80.0;
+const DOLPHIN_STICK_RADIUS: f64 = 127.0;
 
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord,
-)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 pub enum BindingId {
     AnalogUp,
@@ -536,7 +536,12 @@ impl B0xxState {
 }
 
 fn normalize_axis(value: f64) -> f64 {
-    ((value + 1.0) / 2.0).clamp(0.0, 1.0)
+    // The B0XX coordinate tables are authored against the GameCube's effective
+    // 80-unit stick radius. Slippi pipes want 0..1 values that Dolphin later
+    // expands across its full 127-unit internal stick radius, so we scale first
+    // and then shift into the pipe's neutral-centered range.
+    let scaled = value.clamp(-1.0, 1.0) * (GAMECUBE_STICK_RADIUS / DOLPHIN_STICK_RADIUS);
+    ((scaled + 1.0) / 2.0).clamp(0.0, 1.0)
 }
 
 fn normalize_trigger(value: u8) -> f64 {
@@ -679,7 +684,7 @@ mod tests {
             pressed: true,
         });
         approx_eq(snapshot.main_x, 0.5);
-        approx_eq(snapshot.main_y, 1.0);
+        approx_eq(snapshot.main_y, normalize_axis(1.0));
     }
 
     #[test]
@@ -690,7 +695,7 @@ mod tests {
             pressed: true,
         });
         approx_eq(snapshot.main_x, 0.5);
-        approx_eq(snapshot.main_y, 0.0);
+        approx_eq(snapshot.main_y, normalize_axis(-1.0));
     }
 
     #[test]
@@ -700,7 +705,7 @@ mod tests {
             binding: BindingId::AnalogLeft,
             pressed: true,
         });
-        approx_eq(snapshot.main_x, 0.0);
+        approx_eq(snapshot.main_x, normalize_axis(-1.0));
         approx_eq(snapshot.main_y, 0.5);
     }
 
@@ -711,7 +716,7 @@ mod tests {
             binding: BindingId::AnalogRight,
             pressed: true,
         });
-        approx_eq(snapshot.main_x, 1.0);
+        approx_eq(snapshot.main_x, normalize_axis(1.0));
         approx_eq(snapshot.main_y, 0.5);
     }
 
@@ -726,7 +731,7 @@ mod tests {
             binding: BindingId::AnalogLeft,
             pressed: true,
         });
-        approx_eq(snapshot.main_x, 0.0);
+        approx_eq(snapshot.main_x, normalize_axis(-1.0));
     }
 
     #[test]
@@ -740,7 +745,7 @@ mod tests {
             binding: BindingId::AnalogDown,
             pressed: true,
         });
-        approx_eq(snapshot.main_y, 0.0);
+        approx_eq(snapshot.main_y, normalize_axis(-1.0));
     }
 
     #[test]
@@ -792,7 +797,7 @@ mod tests {
             binding: BindingId::B,
             pressed: true,
         });
-        approx_eq(snapshot.main_x, 1.0);
+        approx_eq(snapshot.main_x, normalize_axis(1.0));
         approx_eq(snapshot.main_y, 0.5);
     }
 
@@ -834,8 +839,14 @@ mod tests {
             binding: BindingId::ModY,
             pressed: true,
         });
-        approx_eq(snapshot.main_x, normalize_axis(COORDS_AIRDODGE_QUADRANT_12_MOD_Y.0));
-        approx_eq(snapshot.main_y, normalize_axis(COORDS_AIRDODGE_QUADRANT_12_MOD_Y.1));
+        approx_eq(
+            snapshot.main_x,
+            normalize_axis(COORDS_AIRDODGE_QUADRANT_12_MOD_Y.0),
+        );
+        approx_eq(
+            snapshot.main_y,
+            normalize_axis(COORDS_AIRDODGE_QUADRANT_12_MOD_Y.1),
+        );
     }
 
     #[test]
@@ -884,8 +895,14 @@ mod tests {
             binding: BindingId::CRight,
             pressed: true,
         });
-        approx_eq(snapshot.main_x, normalize_axis(COORDS_EXT_FIREFOX_MOD_Y_C_RIGHT.0));
-        approx_eq(snapshot.main_y, normalize_axis(COORDS_EXT_FIREFOX_MOD_Y_C_RIGHT.1));
+        approx_eq(
+            snapshot.main_x,
+            normalize_axis(COORDS_EXT_FIREFOX_MOD_Y_C_RIGHT.0),
+        );
+        approx_eq(
+            snapshot.main_y,
+            normalize_axis(COORDS_EXT_FIREFOX_MOD_Y_C_RIGHT.1),
+        );
     }
 
     #[test]
@@ -920,6 +937,18 @@ mod tests {
         });
         approx_eq(snapshot.c_x, normalize_axis(0.9));
         approx_eq(snapshot.c_y, normalize_axis(0.5));
+    }
+
+    #[test]
+    fn full_cardinal_uses_gamecube_effective_radius() {
+        approx_eq(
+            normalize_axis(1.0),
+            0.5 + (GAMECUBE_STICK_RADIUS / DOLPHIN_STICK_RADIUS) / 2.0,
+        );
+        approx_eq(
+            normalize_axis(-1.0),
+            0.5 - (GAMECUBE_STICK_RADIUS / DOLPHIN_STICK_RADIUS) / 2.0,
+        );
     }
 
     #[test]
