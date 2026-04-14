@@ -1,0 +1,13 @@
+[package]
+name = "key-b0x-platform-linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+evdev.workspace = true
+nix.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

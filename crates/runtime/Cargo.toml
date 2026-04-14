@@ -1,0 +1,19 @@
+[package]
+name = "key-b0x-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+dirs.workspace = true
+evdev.workspace = true
+serde.workspace = true
+signal-hook.workspace = true
+toml.workspace = true
+key-b0x-core = { path = "../core" }
+key-b0x-platform-linux = { path = "../platform-linux" }
+
+[dev-dependencies]
+tempfile.workspace = true
