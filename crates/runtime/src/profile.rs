@@ -39,7 +39,10 @@ pub fn ensure_pipes_dir(slippi_user_path: &Path) -> Result<PathBuf> {
 }
 
 pub fn install_profile(slippi_user_path: &Path) -> Result<PathBuf> {
-    let profile_dir = slippi_user_path.join("Config").join("Profiles").join("GCPad");
+    let profile_dir = slippi_user_path
+        .join("Config")
+        .join("Profiles")
+        .join("GCPad");
     fs::create_dir_all(&profile_dir)
         .with_context(|| format!("failed to create {}", profile_dir.display()))?;
     ensure_pipes_dir(slippi_user_path)?;

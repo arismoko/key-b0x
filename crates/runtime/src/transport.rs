@@ -139,9 +139,13 @@ fn build_diff_lines(previous: &ControllerSnapshot, current: &ControllerSnapshot)
         }
     }
 
-    if axes_changed(previous.main_x, current.main_x) || axes_changed(previous.main_y, current.main_y)
+    if axes_changed(previous.main_x, current.main_x)
+        || axes_changed(previous.main_y, current.main_y)
     {
-        lines.push(format!("SET MAIN {:.6} {:.6}", current.main_x, current.main_y));
+        lines.push(format!(
+            "SET MAIN {:.6} {:.6}",
+            current.main_x, current.main_y
+        ));
     }
     if axes_changed(previous.c_x, current.c_x) || axes_changed(previous.c_y, current.c_y) {
         lines.push(format!("SET C {:.6} {:.6}", current.c_x, current.c_y));

@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Parser, Subcommand};
 use config::{AppConfig, default_config_path, load_or_create, render_default};
 use evdev::KeyCode;
-use key_b0x_core::{BindingId, B0xxEngine, InputEvent};
+use key_b0x_core::{B0xxEngine, BindingId, InputEvent};
 use key_b0x_platform_linux::{
     KeyboardCapture, auto_detect_keyboard, key_code_from_name, list_keyboards,
 };
@@ -123,7 +123,11 @@ fn run_command(
     println!("Slippi user path: {}", config.slippi_user_path.display());
     println!(
         "Pipe path: {}",
-        config.slippi_user_path.join("Pipes").join("slippibot1").display()
+        config
+            .slippi_user_path
+            .join("Pipes")
+            .join("slippibot1")
+            .display()
     );
     if exclusive_capture {
         println!("Exclusive capture enabled");
@@ -221,12 +225,8 @@ mod tests {
     #[test]
     fn resolved_bindings_reject_duplicates() {
         let mut config = AppConfig::default();
-        config
-            .bindings
-            .insert(BindingId::A, "KEY_M".to_string());
-        config
-            .bindings
-            .insert(BindingId::B, "KEY_M".to_string());
+        config.bindings.insert(BindingId::A, "KEY_M".to_string());
+        config.bindings.insert(BindingId::B, "KEY_M".to_string());
 
         assert!(ResolvedBindings::new(&config).is_err());
     }

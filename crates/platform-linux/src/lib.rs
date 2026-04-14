@@ -30,10 +30,12 @@ pub fn key_name(code: KeyCode) -> String {
 
 pub fn list_keyboards() -> Vec<KeyboardInfo> {
     let mut keyboards = enumerate()
-        .filter_map(|(path, device)| is_keyboard_device(&device).then(|| KeyboardInfo {
-            path,
-            name: device.name().unwrap_or("Unnamed keyboard").to_string(),
-        }))
+        .filter_map(|(path, device)| {
+            is_keyboard_device(&device).then(|| KeyboardInfo {
+                path,
+                name: device.name().unwrap_or("Unnamed keyboard").to_string(),
+            })
+        })
         .collect::<Vec<_>>();
 
     keyboards.sort_by(|lhs, rhs| lhs.path.cmp(&rhs.path));
