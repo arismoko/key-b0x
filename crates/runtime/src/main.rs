@@ -11,6 +11,7 @@ use key_b0x_platform::{KeyboardBackend, KeyboardCaptureSession, NormalizedKey, T
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
+use std::io::Read;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{
@@ -117,7 +118,7 @@ fn run_command_inner(
     let mut capture = backend.open()?;
     let mut emitter = SnapshotEmitter::new(platform::active_transport(&config.slippi_user_path, 1)?);
     let stop = Arc::new(AtomicBool::new(false));
-    register_signals(&stop)?;
+    register_shutdown_triggers(&stop)?;
 
     println!("Keyboard capture: all detected keyboards");
     println!("Keyboard count: {}", keyboards.len());
@@ -178,10 +179,35 @@ fn log_transport_status(debug: &mut DebugLogger, stage: &str, status: TransportS
     debug.log(format!("{stage}={label}"));
 }
 
-fn register_signals(stop: &Arc<AtomicBool>) -> Result<()> {
+fn register_shutdown_triggers(stop: &Arc<AtomicBool>) -> Result<()> {
     signal_hook::flag::register(SIGINT, Arc::clone(stop)).context("failed to register SIGINT")?;
     signal_hook::flag::register(SIGTERM, Arc::clone(stop)).context("failed to register SIGTERM")?;
+    spawn_shutdown_on_reader_eof(std::io::stdin(), Arc::clone(stop));
     Ok(())
+}
+
+fn spawn_shutdown_on_reader_eof<R>(mut reader: R, stop: Arc<AtomicBool>)
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut buffer = [0_u8; 1];
+        loop {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+
+            match reader.read(&mut buffer) {
+                Ok(0) => {
+                    stop.store(true, Ordering::Relaxed);
+                    break;
+                }
+                Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+    });
 }
 
 struct DebugLogger {
@@ -242,6 +268,7 @@ impl ResolvedBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     #[test]
     fn resolved_bindings_reject_duplicates() {
@@ -266,5 +293,20 @@ mod tests {
                 .join("netplay")
                 .join("User")
         ));
+    }
+
+    #[test]
+    fn reader_eof_requests_shutdown() {
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_shutdown_on_reader_eof(Cursor::new(Vec::<u8>::new()), Arc::clone(&stop));
+
+        for _ in 0..20 {
+            if stop.load(Ordering::Relaxed) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        panic!("stdin EOF watcher did not request shutdown");
     }
 }

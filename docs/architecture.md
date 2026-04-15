@@ -1,7 +1,7 @@
 # Architecture
 
 `key-b0x` is split into a pure controller core, a shared platform boundary, and
-platform-specific runtime layers.
+platform-specific runtime layers, plus a thin desktop shell.
 
 - `key-b0x-core` owns the B0XX rules, SOCD handling, Firefox angles, shield
   behavior, and snapshot generation.
@@ -15,11 +15,14 @@ platform-specific runtime layers.
   diffing snapshots into Slippi pipe commands, and process lifecycle. The
   runtime chooses the active backend with `cfg` gates and keeps the input loop
   platform-neutral.
+- `apps/desktop` owns the Electron shell, config editing UI, Slippi setup
+  guidance, and runtime child-process lifecycle. It talks to the runtime over a
+  small IPC layer instead of reimplementing gameplay behavior.
 
-The Rust runtime is the source of truth for gameplay behavior. The future
-desktop app should treat it as a managed child process rather than reimplement
-input logic in JavaScript.
+The Rust runtime is the source of truth for gameplay behavior. The desktop app
+treats it as a managed child process rather than reimplementing input logic in
+JavaScript.
 
-Config is normalized around DOM-style physical key codes so the future Electron
-GUI can share the same binding language on Linux and Windows. Platform crates
-translate between those normalized codes and the OS-native keyboard APIs.
+Config is normalized around DOM-style physical key codes so the Electron GUI can
+share the same binding language on Linux and Windows. Platform crates translate
+between those normalized codes and the OS-native keyboard APIs.

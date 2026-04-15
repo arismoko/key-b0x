@@ -14,8 +14,9 @@ The native runtime is split into:
 - `crates/runtime`: CLI runtime for listing keyboards, installing the Slippi
   profile, printing default config, and running the input loop
 
-The future Electron desktop app is intentionally deferred until the native
-runtime is stable.
+The repo now also includes an Electron desktop app in `apps/desktop`. It wraps
+the Rust runtime with a wizard-style SPA for Slippi setup, binding edits, and
+runtime start / stop.
 
 ## Current Commands
 
@@ -24,6 +25,14 @@ cargo run -p key-b0x-runtime -- list-keyboards
 cargo run -p key-b0x-runtime -- print-default-config
 cargo run -p key-b0x-runtime -- install-profile
 cargo run -p key-b0x-runtime -- run
+```
+
+## Desktop App
+
+```bash
+cd apps/desktop
+npm install
+npm run dev
 ```
 
 ## Runtime Notes
@@ -46,5 +55,5 @@ cargo run -p key-b0x-runtime -- run
 
 ## Next Steps
 
-- Add the Electron + React + TypeScript desktop UI
-- Test the Windows runtime against a real Slippi install
+- connect the desktop app to packaged runtime binaries
+- expand desktop-side tests around IPC and runtime lifecycle
