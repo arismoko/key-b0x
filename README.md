@@ -1,6 +1,6 @@
 # key-b0x
 
-`key-b0x` is a cross-platform Slippi keyboard controller desktop app. It writes directly to Slippi's pipe controller backend instead of creating a virtual gamepad. This means you just need to download one executable to get up and running.
+`key-b0x` is a cross-platform Slippi keyboard controller based on the work of [agirardeau/b0xx-ahk](https://github.com/agirardeau/b0xx-ahk) and [JonnyHaystack/HayBox](https://github.com/JonnyHaystack/HayBox). It writes directly to Slippi's pipe controller backend instead of creating a virtual gamepad. This means you just need to download one executable to get up and running.
 
 I made this because the other solutions typically require the user to fuss around with outdated drivers and autohotkey. This is a user friendly way to avoid all that for people who just want to play on Slippi with their keyboard.
 
