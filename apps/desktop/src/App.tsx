@@ -1,12 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BINDING_GROUPS,
   DEFAULT_BINDINGS,
+  DEFAULT_MELEE_CONFIG,
   type AppConfig,
+  cloneMeleeConfig,
   type BindingId,
   type BindingMap,
+  type DownDiagonalBehavior,
+  type HorizontalSocdOverride,
+  type MeleeConfig,
   type NormalizedKey,
   type RuntimeState,
+  type SocdMode,
   type SetupStatus,
   findDuplicateBindings,
   formatBindingLabel,
@@ -15,27 +21,120 @@ import {
 } from '../shared/model';
 
 type AppView = 'onboarding' | 'dashboard';
+type ToastTone = 'info' | 'success' | 'warning' | 'error';
+
+type Toast = {
+  id: number;
+  message: string;
+  tone: ToastTone;
+};
+
+type MeleeSettingsDraft = {
+  socd_mode: SocdMode;
+  down_diagonal: DownDiagonalBehavior;
+  horizontal_socd_override: HorizontalSocdOverride;
+  airdodge_kind: MeleeConfig['airdodge']['kind'];
+  airdodge_x: string;
+  airdodge_y: string;
+};
+
+type SelectOption<T extends string> = {
+  value: T;
+  label: string;
+  detail?: string;
+  tag?: string;
+};
 
 const IDLE_RUNTIME: RuntimeState = {
   status: 'idle',
   startedAt: null,
   lastError: null
 };
+const TOAST_LIFETIME_MS = 3200;
+const SOCD_MODE_OPTIONS: SelectOption<SocdMode>[] = [
+  {
+    value: 'second_input_priority_no_reactivation',
+    label: '2IP No Reactivation',
+    detail: 'Latest input wins without reactivation',
+    tag: 'Default'
+  },
+  {
+    value: 'second_input_priority',
+    label: '2IP',
+    detail: 'Latest input wins'
+  },
+  {
+    value: 'neutral',
+    label: 'Neutral',
+    detail: 'Opposites cancel out'
+  },
+  {
+    value: 'dir1_priority',
+    label: 'Dir1 Priority',
+    detail: 'First direction wins'
+  },
+  {
+    value: 'dir2_priority',
+    label: 'Dir2 Priority',
+    detail: 'Second direction wins'
+  }
+];
+const DOWN_DIAGONAL_OPTIONS: SelectOption<DownDiagonalBehavior>[] = [
+  {
+    value: 'auto_jab_cancel',
+    label: 'Auto Jab Cancel',
+    detail: 'Standard down-diagonal behavior',
+    tag: 'Default'
+  },
+  {
+    value: 'crouch_walk_os',
+    label: 'Crouch Walk OS',
+    detail: 'Favor crouch walk option select'
+  }
+];
+const HORIZONTAL_SOCD_OVERRIDE_OPTIONS: SelectOption<HorizontalSocdOverride>[] = [
+  {
+    value: 'max_jump_trajectory',
+    label: 'Max Jump Trajectory',
+    detail: 'Preserve the jump arc',
+    tag: 'Default'
+  },
+  {
+    value: 'disabled',
+    label: 'Disabled',
+    detail: 'Use raw horizontal SOCD'
+  }
+];
+const AIRDODGE_KIND_OPTIONS: SelectOption<MeleeSettingsDraft['airdodge_kind']>[] = [
+  {
+    value: 'default',
+    label: 'Default',
+    detail: 'Standard runtime diagonal',
+    tag: 'Default'
+  },
+  {
+    value: 'custom_mod_x_diagonal',
+    label: 'Custom Mod-X Shield Diagonal',
+    detail: 'Tune the custom X/Y diagonal'
+  }
+];
 
 function App() {
   const [appView, setAppView] = useState<AppView>('onboarding');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [bindingDraft, setBindingDraft] = useState<BindingMap | null>(null);
+  const [meleeDraft, setMeleeDraft] = useState<MeleeSettingsDraft | null>(null);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [runtime, setRuntime] = useState<RuntimeState>(IDLE_RUNTIME);
   const [slippiPathDraft, setSlippiPathDraft] = useState('');
   const [captureTarget, setCaptureTarget] = useState<BindingId | null>(null);
   const [loading, setLoading] = useState(true);
   const [screenError, setScreenError] = useState<string | null>(null);
-  const [setupFeedback, setSetupFeedback] = useState<string | null>(null);
-  const [bindingFeedback, setBindingFeedback] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const nextToastId = useRef(0);
+  const toastTimeouts = useRef(new Map<number, number>());
 
   useEffect(() => {
     let mounted = true;
@@ -60,6 +159,7 @@ function App() {
 
         setConfig(cloneConfig(loadedConfig));
         setBindingDraft({ ...loadedConfig.bindings });
+        setMeleeDraft(meleeDraftFromConfig(loadedConfig.melee));
         setSlippiPathDraft(loadedConfig.slippi_user_path);
         setRuntime(loadedRuntimeState);
         setSetup(setupStatus);
@@ -113,6 +213,41 @@ function App() {
   }, []);
 
   useEffect(() => {
+    return () => {
+      for (const timeoutId of toastTimeouts.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+
+      toastTimeouts.current.clear();
+    };
+  }, []);
+
+  function dismissToast(id: number) {
+    const timeoutId = toastTimeouts.current.get(id);
+
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+      toastTimeouts.current.delete(id);
+    }
+
+    setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== id));
+  }
+
+  function pushToast(message: string, tone: ToastTone = 'info') {
+    nextToastId.current += 1;
+    const id = nextToastId.current;
+
+    setToasts((currentToasts) => [...currentToasts, { id, message, tone }]);
+
+    const timeoutId = window.setTimeout(() => {
+      toastTimeouts.current.delete(id);
+      setToasts((currentToasts) => currentToasts.filter((toast) => toast.id !== id));
+    }, TOAST_LIFETIME_MS);
+
+    toastTimeouts.current.set(id, timeoutId);
+  }
+
+  useEffect(() => {
     if (!captureTarget) {
       return;
     }
@@ -125,7 +260,7 @@ function App() {
 
       if (event.code === 'Escape') {
         setCaptureTarget(null);
-        setBindingFeedback('Rebind cancelled.');
+        pushToast('Rebind cancelled.');
         return;
       }
 
@@ -144,7 +279,7 @@ function App() {
         };
       });
       setCaptureTarget(null);
-      setBindingFeedback(`Assigned ${formatBindingLabel(target)} to ${formatKeyLabel(event.code)}.`);
+      pushToast(`Assigned ${formatBindingLabel(target)} to ${formatKeyLabel(event.code)}.`);
     }
 
     window.addEventListener('keydown', handleKeyDown, true);
@@ -154,6 +289,11 @@ function App() {
   }, [captureTarget]);
 
   const runtimeLocked = isRuntimeLocked(runtime.status);
+  const meleeLocked =
+    busyAction === 'save-melee' ||
+    busyAction === 'apply-setup' ||
+    runtime.status === 'starting' ||
+    runtime.status === 'stopping';
   const bindingsLocked =
     busyAction === 'save-bindings' ||
     busyAction === 'apply-setup' ||
@@ -170,6 +310,11 @@ function App() {
   );
   const bindingsDirty = Boolean(
     config && bindingDraft && !bindingMapsEqual(config.bindings, bindingDraft)
+  );
+  const meleeDirty = Boolean(config && meleeDraft && !meleeDraftMatchesConfig(meleeDraft, config.melee));
+  const meleeValidationMessage = useMemo(
+    () => (meleeDraft ? validateMeleeDraft(meleeDraft) : null),
+    [meleeDraft]
   );
   const setupComplete = Boolean(setup?.slippiFound && setup?.profileInstalled);
   const bindingsReady = duplicateGroups.length === 0 && !bindingsDirty;
@@ -235,20 +380,32 @@ function App() {
 
     setBusyAction('apply-setup');
     setScreenError(null);
-    setSetupFeedback(null);
 
     try {
+      const shouldRestartRuntime = isRuntimeLive(runtime.status);
       const savedConfig = await window.keyB0x.saveConfig({
         ...config,
         slippi_user_path: nextPath
       });
 
-      setConfig(cloneConfig(savedConfig));
-      setBindingDraft({ ...savedConfig.bindings });
+      setConfig((currentConfig) =>
+        currentConfig
+          ? {
+              ...currentConfig,
+              slippi_user_path: savedConfig.slippi_user_path
+            }
+          : cloneConfig(savedConfig)
+      );
       setSlippiPathDraft(savedConfig.slippi_user_path);
       await window.keyB0x.installProfile();
       const nextSetup = await refreshSetup();
-      setSetupFeedback(pathChanged ? 'Updated.' : 'Installed.');
+
+      if (shouldRestartRuntime) {
+        await window.keyB0x.stopRuntime();
+        await window.keyB0x.startRuntime();
+      }
+
+      pushToast(pathChanged ? 'Updated.' : 'Installed.', 'success');
       return nextSetup.slippiFound && nextSetup.profileInstalled;
     } catch (error) {
       setScreenError(messageFromError(error));
@@ -270,7 +427,6 @@ function App() {
 
     setBusyAction('save-bindings');
     setScreenError(null);
-    setBindingFeedback(null);
 
     try {
       const shouldRestartRuntime = !settingsOpen && isRuntimeLive(runtime.status);
@@ -297,7 +453,7 @@ function App() {
         await window.keyB0x.startRuntime();
       }
 
-      setBindingFeedback('Bindings saved.');
+      pushToast('Bindings saved.', 'success');
     } catch (error) {
       setScreenError(messageFromError(error));
     } finally {
@@ -307,7 +463,68 @@ function App() {
 
   function handleRestoreDefaults() {
     setBindingDraft({ ...DEFAULT_BINDINGS });
-    setBindingFeedback('Restored default bindings. Save to keep them.');
+    pushToast('Restored default bindings. Save to keep them.');
+  }
+
+  async function handleSaveMelee() {
+    if (!config || !meleeDraft) {
+      return;
+    }
+
+    const validationMessage = validateMeleeDraft(meleeDraft);
+    if (validationMessage) {
+      return;
+    }
+
+    const meleeConfig = meleeConfigFromDraft(meleeDraft);
+    setBusyAction('save-melee');
+    setScreenError(null);
+
+    try {
+      const shouldRestartRuntime = isRuntimeLive(runtime.status);
+      const savedConfig = await window.keyB0x.saveConfig({
+        ...config,
+        melee: meleeConfig
+      });
+
+      setConfig((currentConfig) =>
+        currentConfig
+          ? {
+              ...currentConfig,
+              melee: cloneMeleeConfig(savedConfig.melee)
+            }
+          : cloneConfig(savedConfig)
+      );
+      setMeleeDraft(meleeDraftFromConfig(savedConfig.melee));
+
+      if (shouldRestartRuntime) {
+        await window.keyB0x.stopRuntime();
+        await window.keyB0x.startRuntime();
+      }
+
+      pushToast('Melee settings saved.', 'success');
+    } catch (error) {
+      setScreenError(messageFromError(error));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  function handleRestoreDefaultMelee() {
+    setMeleeDraft(meleeDraftFromConfig(DEFAULT_MELEE_CONFIG));
+    pushToast('Restored default melee settings. Save to keep them.');
+  }
+
+  async function handleBrowseSlippiPath() {
+    try {
+      const pickedPath = await window.keyB0x.pickSlippiUserPath(slippiPathDraft);
+
+      if (pickedPath) {
+        setSlippiPathDraft(pickedPath);
+      }
+    } catch (error) {
+      setScreenError(messageFromError(error));
+    }
   }
 
   function openSettings() {
@@ -349,7 +566,7 @@ function App() {
     }
   }
 
-  if (loading || !config || !bindingDraft || !setup) {
+  if (loading || !config || !bindingDraft || !meleeDraft || !setup) {
     return (
       <div className="app-shell">
         <div className="app-backdrop" />
@@ -401,14 +618,13 @@ function App() {
               <h2>Detected Slippi Path</h2>
             </div>
 
-            <SetupSection
-              runtimeLocked={runtimeLocked}
-              busyAction={busyAction}
-              slippiPathDraft={slippiPathDraft}
-              setSlippiPathDraft={setSlippiPathDraft}
-              setupFeedback={null}
-              label="Path"
-            />
+              <SetupSection
+                busyAction={busyAction}
+                slippiPathDraft={slippiPathDraft}
+                setSlippiPathDraft={setSlippiPathDraft}
+                label="Path"
+                onBrowsePath={handleBrowseSlippiPath}
+              />
 
             <footer className="wizard-footer">
               <div className="wizard-actions">
@@ -440,13 +656,11 @@ function App() {
               duplicateGroups={duplicateGroups}
               duplicateBindings={duplicateBindings}
               captureTarget={captureTarget}
-              bindingFeedback={bindingFeedback}
               bindingsDirty={bindingsDirty}
               onRestoreDefaults={handleRestoreDefaults}
               onSaveBindings={handleSaveBindings}
               onSelectBinding={(binding) => {
                 setCaptureTarget(binding);
-                setBindingFeedback(null);
               }}
             />
           </section>
@@ -469,9 +683,15 @@ function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <div className="settings-modal-header">
-              <h2 id="settings-title" className="settings-modal-title">
-                Settings
-              </h2>
+              <div className="settings-modal-copy">
+                <div className="section-eyebrow">Runtime Config</div>
+                <h2 id="settings-title" className="settings-modal-title">
+                  Settings
+                </h2>
+                <p className="settings-modal-blurb">
+                  Tweak runtime behavior and setup without touching unsaved binding edits.
+                </p>
+              </div>
               <button
                 type="button"
                 className="settings-close"
@@ -480,77 +700,321 @@ function App() {
                   void closeSettings();
                 }}
               >
-                x
+                Close
               </button>
             </div>
 
-            <SetupSection
-              runtimeLocked={runtimeLocked}
-              busyAction={busyAction}
-              slippiPathDraft={slippiPathDraft}
-              setSlippiPathDraft={setSlippiPathDraft}
-              setupFeedback={setupFeedback}
-              label="Slippi Path"
-              onApplySetup={setupDirty || !setupComplete ? handleApplySetup : undefined}
-            />
+            <div className="settings-section">
+              <div className="section-eyebrow">Setup</div>
+              <SetupSection
+                busyAction={busyAction}
+                slippiPathDraft={slippiPathDraft}
+                setSlippiPathDraft={setSlippiPathDraft}
+                label="Slippi Path"
+                onBrowsePath={handleBrowseSlippiPath}
+                onApplySetup={setupDirty || !setupComplete ? handleApplySetup : undefined}
+              />
+            </div>
+
+            <div className="settings-section">
+              <div className="section-eyebrow">Controls</div>
+              <MeleeSettingsSection
+                meleeDraft={meleeDraft}
+                meleeDirty={meleeDirty}
+                validationMessage={meleeValidationMessage}
+                disabled={meleeLocked}
+                onChange={setMeleeDraft}
+                onRestoreDefaults={handleRestoreDefaultMelee}
+                onSave={handleSaveMelee}
+              />
+            </div>
           </section>
+        </div>
+      ) : null}
+
+      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
+    </div>
+  );
+}
+
+function SetupSection({
+  busyAction,
+  slippiPathDraft,
+  setSlippiPathDraft,
+  label,
+  onBrowsePath,
+  onApplySetup
+}: {
+  busyAction: string | null;
+  slippiPathDraft: string;
+  setSlippiPathDraft: (value: string) => void;
+  label: string;
+  onBrowsePath: () => Promise<void>;
+  onApplySetup?: () => Promise<boolean>;
+}) {
+  return (
+    <div className="settings-card settings-card-setup">
+      <div className="settings-card-copy">
+        <h3 className="settings-card-title">{label}</h3>
+        <p className="settings-card-description">
+          Choose the Slippi user directory used for profile installation and pipe transport.
+        </p>
+      </div>
+
+      <label htmlFor="slippi-path" className="settings-input-stack">
+        <span className="settings-input-label">Slippi User Path</span>
+        <div className="settings-path-row">
+          <input
+            id="slippi-path"
+            className="text-input settings-text-input"
+            value={slippiPathDraft}
+            disabled={busyAction === 'apply-setup'}
+            onChange={(event) => setSlippiPathDraft(event.target.value)}
+          />
+          <button
+            type="button"
+            className="button button-secondary settings-browse-button"
+            disabled={busyAction === 'apply-setup'}
+            onClick={() => {
+              void onBrowsePath();
+            }}
+          >
+            Browse
+          </button>
+        </div>
+      </label>
+
+      {onApplySetup ? (
+        <div className="settings-actions">
+          <div className="settings-inline-note">
+            Saving updates the installed controller profile and restarts the runtime if needed.
+          </div>
+          <div className="toolbar-actions">
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={busyAction === 'apply-setup'}
+              onClick={() => {
+                void onApplySetup();
+              }}
+            >
+              Save Setup
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
   );
 }
 
-function SetupSection({
-  runtimeLocked,
-  busyAction,
-  slippiPathDraft,
-  setSlippiPathDraft,
-  setupFeedback,
-  label,
-  onApplySetup
+function MeleeSettingsSection({
+  meleeDraft,
+  meleeDirty,
+  validationMessage,
+  disabled,
+  onChange,
+  onRestoreDefaults,
+  onSave
 }: {
-  runtimeLocked: boolean;
-  busyAction: string | null;
-  slippiPathDraft: string;
-  setSlippiPathDraft: (value: string) => void;
-  setupFeedback: string | null;
-  label: string;
-  onApplySetup?: () => Promise<boolean>;
+  meleeDraft: MeleeSettingsDraft;
+  meleeDirty: boolean;
+  validationMessage: string | null;
+  disabled: boolean;
+  onChange: (draft: MeleeSettingsDraft) => void;
+  onRestoreDefaults: () => void;
+  onSave: () => Promise<void>;
 }) {
   return (
-    <div className="editor-shell">
-      <div className="field-row">
-        <label htmlFor="slippi-path" className="field-label">
-          {label}
-        </label>
-        <input
-          id="slippi-path"
-          className="text-input"
-          value={slippiPathDraft}
-          disabled={runtimeLocked || busyAction === 'apply-setup'}
-          onChange={(event) => setSlippiPathDraft(event.target.value)}
-        />
-      </div>
+    <div className="settings-stack">
+      <SettingChoiceGroup
+        label="SOCD Mode"
+        description="Applies the same SOCD rule to main stick and C-stick axes for now."
+        value={meleeDraft.socd_mode}
+        options={SOCD_MODE_OPTIONS}
+        disabled={disabled}
+        columns="wide"
+        onChange={(value) => onChange({ ...meleeDraft, socd_mode: value })}
+      />
 
-      {onApplySetup ? (
-        <div className="editor-toolbar">
-          <div className="toolbar-actions">
-            <button
-              type="button"
-              className="button button-primary"
-              disabled={runtimeLocked || busyAction === 'apply-setup'}
-              onClick={() => {
-                void onApplySetup();
-              }}
-            >
-              Save
-            </button>
-          </div>
-        </div>
+      <SettingChoiceGroup
+        label="Down Diagonal"
+        description="Choose between auto jab cancel behavior and crouch walk OS."
+        value={meleeDraft.down_diagonal}
+        options={DOWN_DIAGONAL_OPTIONS}
+        disabled={disabled}
+        columns="compact"
+        onChange={(value) => onChange({ ...meleeDraft, down_diagonal: value })}
+      />
+
+      <SettingChoiceGroup
+        label="Horizontal SOCD Override"
+        description="Keep the jump-friendly horizontal override or disable it outright."
+        value={meleeDraft.horizontal_socd_override}
+        options={HORIZONTAL_SOCD_OVERRIDE_OPTIONS}
+        disabled={disabled}
+        columns="compact"
+        onChange={(value) =>
+          onChange({
+            ...meleeDraft,
+            horizontal_socd_override: value
+          })
+        }
+      />
+
+      <SettingChoiceGroup
+        label="Airdodge"
+        description="Use the default runtime diagonal or tune a custom Mod-X shield diagonal."
+        value={meleeDraft.airdodge_kind}
+        options={AIRDODGE_KIND_OPTIONS}
+        disabled={disabled}
+        columns="compact"
+        onChange={(value) => onChange({ ...meleeDraft, airdodge_kind: value })}
+      />
+
+      {meleeDraft.airdodge_kind === 'custom_mod_x_diagonal' ? (
+        <AirdodgeAxisCard
+          x={meleeDraft.airdodge_x}
+          y={meleeDraft.airdodge_y}
+          disabled={disabled}
+          onChangeX={(value) => onChange({ ...meleeDraft, airdodge_x: value })}
+          onChangeY={(value) => onChange({ ...meleeDraft, airdodge_y: value })}
+        />
       ) : null}
 
-      {setupFeedback ? <div className="banner banner-info">{setupFeedback}</div> : null}
+      {validationMessage ? <div className="banner banner-warning">{validationMessage}</div> : null}
+      {meleeDirty ? <div className="settings-inline-note">Unsaved melee settings.</div> : null}
+
+      <div className="settings-actions settings-actions-elevated">
+        <div className="settings-inline-note">Saving restarts the runtime.</div>
+        <div className="toolbar-actions">
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={disabled}
+            onClick={onRestoreDefaults}
+          >
+            Restore Defaults
+          </button>
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={disabled || !meleeDirty || Boolean(validationMessage)}
+            onClick={() => {
+              void onSave();
+            }}
+          >
+            Save Melee Settings
+          </button>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function SettingChoiceGroup<T extends string>({
+  label,
+  description,
+  value,
+  options,
+  disabled,
+  columns,
+  onChange
+}: {
+  label: string;
+  description: string;
+  value: T;
+  options: SelectOption<T>[];
+  disabled: boolean;
+  columns: 'compact' | 'wide';
+  onChange: (value: T) => void;
+}) {
+  return (
+    <section className="settings-card">
+      <div className="settings-card-copy">
+        <h3 className="settings-card-title">{label}</h3>
+        <p className="settings-card-description">{description}</p>
+      </div>
+
+      <div
+        className={`settings-choice-grid settings-choice-grid-${columns}`}
+        role="group"
+        aria-label={label}
+      >
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={`settings-choice${option.value === value ? ' settings-choice-active' : ''}`}
+            aria-pressed={option.value === value}
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+          >
+            <span className="settings-choice-head">
+              <span className="settings-choice-label">{option.label}</span>
+              {option.tag ? <span className="settings-choice-tag">{option.tag}</span> : null}
+            </span>
+            {option.detail ? <span className="settings-choice-detail">{option.detail}</span> : null}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AirdodgeAxisCard({
+  x,
+  y,
+  disabled,
+  onChangeX,
+  onChangeY
+}: {
+  x: string;
+  y: string;
+  disabled: boolean;
+  onChangeX: (value: string) => void;
+  onChangeY: (value: string) => void;
+}) {
+  return (
+    <section className="settings-card settings-card-subtle">
+      <div className="settings-card-copy">
+        <h3 className="settings-card-title">Custom Airdodge Diagonal</h3>
+        <p className="settings-card-description">
+          Set precise X and Y values between 0 and 1. Step size: 0.0125.
+        </p>
+      </div>
+
+      <div className="settings-axis-grid">
+        <label className="settings-axis-field">
+          <span className="settings-axis-label">Custom Airdodge X</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            max="1"
+            step="0.0125"
+            className="text-input settings-text-input"
+            value={x}
+            disabled={disabled}
+            onChange={(event) => onChangeX(event.target.value)}
+          />
+        </label>
+
+        <label className="settings-axis-field">
+          <span className="settings-axis-label">Custom Airdodge Y</span>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            max="1"
+            step="0.0125"
+            className="text-input settings-text-input"
+            value={y}
+            disabled={disabled}
+            onChange={(event) => onChangeY(event.target.value)}
+          />
+        </label>
+      </div>
+    </section>
   );
 }
 
@@ -562,7 +1026,6 @@ function BindingsSection({
   duplicateGroups,
   duplicateBindings,
   captureTarget,
-  bindingFeedback,
   bindingsDirty,
   onRestoreDefaults,
   onSaveBindings,
@@ -575,7 +1038,6 @@ function BindingsSection({
   duplicateGroups: Array<{ key: NormalizedKey; bindings: BindingId[] }>;
   duplicateBindings: Set<BindingId>;
   captureTarget: BindingId | null;
-  bindingFeedback: string | null;
   bindingsDirty: boolean;
   onRestoreDefaults: () => void;
   onSaveBindings: () => Promise<void>;
@@ -618,11 +1080,9 @@ function BindingsSection({
         <div className="banner banner-warning">{duplicateMessage(duplicateGroups[0])}</div>
       ) : captureTarget ? (
         <div className="banner banner-info">Press a key. Esc cancels.</div>
-      ) : bindingFeedback ? (
-        <div className="banner banner-info">{bindingFeedback}</div>
-      ) : (
-        <div className="binding-note">{bindingsDirty ? 'Unsaved binding changes.' : '24 bindings ready.'}</div>
-      )}
+      ) : bindingsDirty ? (
+        <div className="binding-note">Unsaved binding changes.</div>
+      ) : null}
 
       <div className="binding-groups">
         {BINDING_GROUPS.map((group) => (
@@ -661,6 +1121,36 @@ function BindingsSection({
           </section>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ToastViewport({
+  toasts,
+  onDismiss
+}: {
+  toasts: Toast[];
+  onDismiss: (id: number) => void;
+}) {
+  if (toasts.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="toast-viewport" aria-live="polite" aria-atomic="true">
+      {toasts.map((toast) => (
+        <div key={toast.id} className={`toast toast-${toast.tone}`}>
+          <div className="toast-message">{toast.message}</div>
+          <button
+            type="button"
+            className="toast-dismiss"
+            aria-label="Dismiss notification"
+            onClick={() => onDismiss(toast.id)}
+          >
+            x
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -746,10 +1236,103 @@ function isRuntimeLive(status: RuntimeState['status']): boolean {
   return status === 'starting' || status === 'running' || status === 'waiting_for_slippi';
 }
 
+function meleeDraftFromConfig(melee: MeleeConfig): MeleeSettingsDraft {
+  return {
+    socd_mode: melee.socd.main_x,
+    down_diagonal: melee.down_diagonal,
+    horizontal_socd_override: melee.horizontal_socd_override,
+    airdodge_kind: melee.airdodge.kind,
+    airdodge_x:
+      melee.airdodge.kind === 'custom_mod_x_diagonal' ? formatDraftNumber(melee.airdodge.x) : '',
+    airdodge_y:
+      melee.airdodge.kind === 'custom_mod_x_diagonal' ? formatDraftNumber(melee.airdodge.y) : ''
+  };
+}
+
+function meleeConfigFromDraft(draft: MeleeSettingsDraft): MeleeConfig {
+  if (draft.airdodge_kind === 'custom_mod_x_diagonal') {
+    return {
+      socd: createUniformSocdConfig(draft.socd_mode),
+      down_diagonal: draft.down_diagonal,
+      horizontal_socd_override: draft.horizontal_socd_override,
+      airdodge: {
+        kind: 'custom_mod_x_diagonal',
+        x: Number(draft.airdodge_x.trim()),
+        y: Number(draft.airdodge_y.trim())
+      }
+    };
+  }
+
+  return {
+    socd: createUniformSocdConfig(draft.socd_mode),
+    down_diagonal: draft.down_diagonal,
+    horizontal_socd_override: draft.horizontal_socd_override,
+    airdodge: {
+      kind: 'default'
+    }
+  };
+}
+
+function validateMeleeDraft(draft: MeleeSettingsDraft): string | null {
+  if (draft.airdodge_kind !== 'custom_mod_x_diagonal') {
+    return null;
+  }
+
+  const xText = draft.airdodge_x.trim();
+  const yText = draft.airdodge_y.trim();
+
+  if (xText.length === 0 || yText.length === 0) {
+    return 'Custom airdodge X and Y are required.';
+  }
+
+  const x = Number(xText);
+  const y = Number(yText);
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return 'Custom airdodge X and Y must be numeric.';
+  }
+
+  if (x <= 0 || x > 1 || y <= 0 || y > 1) {
+    return 'Custom airdodge X and Y must be within (0, 1].';
+  }
+
+  return null;
+}
+
+function meleeDraftMatchesConfig(draft: MeleeSettingsDraft, melee: MeleeConfig): boolean {
+  if (
+    draft.socd_mode !== melee.socd.main_x ||
+    draft.socd_mode !== melee.socd.main_y ||
+    draft.socd_mode !== melee.socd.c_x ||
+    draft.socd_mode !== melee.socd.c_y ||
+    draft.down_diagonal !== melee.down_diagonal ||
+    draft.horizontal_socd_override !== melee.horizontal_socd_override ||
+    draft.airdodge_kind !== melee.airdodge.kind
+  ) {
+    return false;
+  }
+
+  if (draft.airdodge_kind !== 'custom_mod_x_diagonal') {
+    return true;
+  }
+
+  const validationMessage = validateMeleeDraft(draft);
+  if (validationMessage) {
+    return false;
+  }
+
+  return (
+    melee.airdodge.kind === 'custom_mod_x_diagonal' &&
+    Number(draft.airdodge_x.trim()) === melee.airdodge.x &&
+    Number(draft.airdodge_y.trim()) === melee.airdodge.y
+  );
+}
+
 function cloneConfig(config: AppConfig): AppConfig {
   return {
     ...config,
-    bindings: { ...config.bindings }
+    bindings: { ...config.bindings },
+    melee: cloneMeleeConfig(config.melee)
   };
 }
 
@@ -765,6 +1348,19 @@ function messageFromError(error: unknown): string {
   }
 
   return 'Something went wrong.';
+}
+
+function createUniformSocdConfig(mode: SocdMode): MeleeConfig['socd'] {
+  return {
+    main_x: mode,
+    main_y: mode,
+    c_x: mode,
+    c_y: mode
+  };
+}
+
+function formatDraftNumber(value: number): string {
+  return `${value}`;
 }
 
 export default App;

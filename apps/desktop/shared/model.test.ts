@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_MELEE_CONFIG,
   DEFAULT_BINDINGS,
   createDefaultConfig,
   findDuplicateBindings,
@@ -45,6 +46,52 @@ describe('model helpers', () => {
       bindings: {
         ...DEFAULT_BINDINGS,
         analog_up: 'KeyW'
+      }
+    });
+  });
+
+  it('creates default configs with the default melee subtree', () => {
+    const config = createDefaultConfig('/tmp/SlippiOnline');
+
+    expect(config.melee).toEqual(DEFAULT_MELEE_CONFIG);
+  });
+
+  it('normalizes melee settings from config files', () => {
+    const config = normalizeConfig(
+      {
+        version: 2,
+        melee: {
+          socd: {
+            main_x: 'dir1_priority',
+            main_y: 'dir1_priority',
+            c_x: 'dir1_priority',
+            c_y: 'dir1_priority'
+          },
+          down_diagonal: 'crouch_walk_os',
+          horizontal_socd_override: 'disabled',
+          airdodge: {
+            kind: 'custom_mod_x_diagonal',
+            x: 0.625,
+            y: 0.75
+          }
+        }
+      },
+      '/tmp/SlippiOnline'
+    );
+
+    expect(config.melee).toEqual({
+      socd: {
+        main_x: 'dir1_priority',
+        main_y: 'dir1_priority',
+        c_x: 'dir1_priority',
+        c_y: 'dir1_priority'
+      },
+      down_diagonal: 'crouch_walk_os',
+      horizontal_socd_override: 'disabled',
+      airdodge: {
+        kind: 'custom_mod_x_diagonal',
+        x: 0.625,
+        y: 0.75
       }
     });
   });

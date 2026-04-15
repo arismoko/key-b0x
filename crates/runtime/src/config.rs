@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
-use key_b0x_core::BindingId;
+use key_b0x_core::{BindingId, MeleeConfig};
 use key_b0x_platform::NormalizedKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -18,6 +18,8 @@ pub struct AppConfig {
     pub port: u8,
     #[serde(default = "default_bindings")]
     pub bindings: BTreeMap<BindingId, NormalizedKey>,
+    #[serde(default)]
+    pub melee: MeleeConfig,
 }
 
 impl Default for AppConfig {
@@ -27,6 +29,7 @@ impl Default for AppConfig {
             slippi_user_path: default_slippi_user_path(),
             port: default_port(),
             bindings: default_bindings(),
+            melee: MeleeConfig::default(),
         }
     }
 }
@@ -35,9 +38,12 @@ impl AppConfig {
     pub fn normalize(mut self) -> Self {
         let defaults = default_bindings();
         for binding in BindingId::ALL {
-            self.bindings
-                .entry(binding)
-                .or_insert_with(|| defaults.get(&binding).copied().unwrap_or(NormalizedKey::KeyA));
+            self.bindings.entry(binding).or_insert_with(|| {
+                defaults
+                    .get(&binding)
+                    .copied()
+                    .unwrap_or(NormalizedKey::KeyA)
+            });
         }
 
         if self.port == 0 {
@@ -76,7 +82,10 @@ pub fn load(path: &Path) -> Result<AppConfig> {
         .with_context(|| format!("failed to read config {}", path.display()))?;
     let parsed: toml::Value =
         toml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))?;
-    let version = parsed.get("version").and_then(|value| value.as_integer()).unwrap_or(0);
+    let version = parsed
+        .get("version")
+        .and_then(|value| value.as_integer())
+        .unwrap_or(0);
 
     if version != i64::from(CONFIG_VERSION) {
         bail!(
@@ -85,9 +94,15 @@ pub fn load(path: &Path) -> Result<AppConfig> {
         );
     }
 
-    let config: AppConfig =
-        parsed.try_into().with_context(|| format!("failed to parse {}", path.display()))?;
-    Ok(config.normalize())
+    let config: AppConfig = parsed
+        .try_into()
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let config = config.normalize();
+    config
+        .melee
+        .validate()
+        .with_context(|| format!("invalid melee config in {}", path.display()))?;
+    Ok(config)
 }
 
 pub fn save(path: &Path, config: &AppConfig) -> Result<()> {
@@ -159,7 +174,11 @@ mod tests {
         let config = AppConfig::default();
         assert_eq!(config.bindings.len(), BindingId::ALL.len());
         assert_eq!(config.port, 1);
-        assert_eq!(config.bindings[&BindingId::AnalogUp], NormalizedKey::BracketRight);
+        assert_eq!(
+            config.bindings[&BindingId::AnalogUp],
+            NormalizedKey::BracketRight
+        );
+        assert_eq!(config.melee, MeleeConfig::default());
     }
 
     #[test]
@@ -190,6 +209,54 @@ analog_up = "KEY_RIGHTBRACE"
         .unwrap();
 
         let error = load(&config_path).unwrap_err();
-        assert!(error.to_string().contains("unsupported key-b0x config version 1"));
+        assert!(
+            error
+                .to_string()
+                .contains("unsupported key-b0x config version 1")
+        );
+    }
+
+    #[test]
+    fn version_two_configs_without_melee_section_load_with_defaults() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+version = 2
+slippi_user_path = "/tmp/SlippiOnline"
+port = 1
+
+[bindings]
+analog_up = "BracketRight"
+analog_down = "Digit3"
+analog_left = "Digit2"
+analog_right = "Digit4"
+mod_x = "KeyV"
+mod_y = "KeyB"
+a = "KeyM"
+b = "KeyO"
+l = "KeyQ"
+r = "Digit9"
+x = "KeyP"
+y = "Digit0"
+z = "BracketLeft"
+c_up = "KeyK"
+c_down = "Space"
+c_left = "KeyN"
+c_right = "Comma"
+light_shield = "Minus"
+mid_shield = "Equal"
+start = "Digit7"
+d_up = "ArrowUp"
+d_down = "ArrowDown"
+d_left = "ArrowLeft"
+d_right = "ArrowRight"
+"#,
+        )
+        .unwrap();
+
+        let config = load(&config_path).unwrap();
+        assert_eq!(config.melee, MeleeConfig::default());
     }
 }

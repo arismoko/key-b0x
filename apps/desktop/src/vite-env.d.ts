@@ -14,6 +14,7 @@ declare global {
       saveConfig: (config: AppConfig) => Promise<AppConfig>;
       checkSetup: () => Promise<SetupStatus>;
       installProfile: () => Promise<InstallProfileResult>;
+      pickSlippiUserPath: (currentPath?: string) => Promise<string | null>;
       getRuntimeState: () => Promise<RuntimeState>;
       startRuntime: () => Promise<RuntimeState>;
       stopRuntime: () => Promise<RuntimeState>;

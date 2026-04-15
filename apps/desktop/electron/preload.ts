@@ -11,6 +11,8 @@ const api = {
   saveConfig: (config: AppConfig): Promise<AppConfig> => ipcRenderer.invoke('config:save', config),
   checkSetup: (): Promise<SetupStatus> => ipcRenderer.invoke('setup:check'),
   installProfile: (): Promise<InstallProfileResult> => ipcRenderer.invoke('profile:install'),
+  pickSlippiUserPath: (currentPath?: string): Promise<string | null> =>
+    ipcRenderer.invoke('path:pick-slippi-user', currentPath),
   getRuntimeState: (): Promise<RuntimeState> => ipcRenderer.invoke('runtime:get-state'),
   startRuntime: (): Promise<RuntimeState> => ipcRenderer.invoke('runtime:start'),
   stopRuntime: (): Promise<RuntimeState> => ipcRenderer.invoke('runtime:stop'),

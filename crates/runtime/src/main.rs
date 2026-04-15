@@ -6,7 +6,7 @@ mod transport;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use config::{AppConfig, default_config_path, load_or_create, render_default};
-use key_b0x_core::{B0xxEngine, BindingId, InputEvent};
+use key_b0x_core::{BindingId, InputEvent, MeleeEngine};
 use key_b0x_platform::{KeyboardBackend, KeyboardCaptureSession, NormalizedKey, TransportStatus};
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use std::collections::HashMap;
@@ -56,7 +56,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::InstallProfile { slippi_user_path } => {
-            let slippi_user_path = slippi_user_path.unwrap_or_else(platform::default_slippi_user_dir);
+            let slippi_user_path =
+                slippi_user_path.unwrap_or_else(platform::default_slippi_user_dir);
             let installed = profile::install_profile(&slippi_user_path)?;
             println!("Installed {}", installed.profile_path.display());
             if let Some(pipes_path) = installed.pipes_path {
@@ -82,7 +83,10 @@ fn list_keyboards_command() -> Result<()> {
     Ok(())
 }
 
-fn run_command(config_override: Option<PathBuf>, slippi_user_override: Option<PathBuf>) -> Result<()> {
+fn run_command(
+    config_override: Option<PathBuf>,
+    slippi_user_override: Option<PathBuf>,
+) -> Result<()> {
     run_command_inner(config_override, slippi_user_override)
 }
 
@@ -116,7 +120,8 @@ fn run_command_inner(
     ));
 
     let mut capture = backend.open()?;
-    let mut emitter = SnapshotEmitter::new(platform::active_transport(&config.slippi_user_path, 1)?);
+    let mut emitter =
+        SnapshotEmitter::new(platform::active_transport(&config.slippi_user_path, 1)?);
     let stop = Arc::new(AtomicBool::new(false));
     register_shutdown_triggers(&stop)?;
 
@@ -135,7 +140,7 @@ fn run_command_inner(
     #[cfg(target_os = "windows")]
     println!("Pipe name: \\\\.\\pipe\\slippibot1");
 
-    let mut engine = B0xxEngine::new();
+    let mut engine = MeleeEngine::try_new(config.melee.clone()).context("invalid melee config")?;
     let startup_status = emitter.emit(&engine.snapshot())?;
     log_transport_status(&mut debug, "startup_emit", startup_status);
 
@@ -147,13 +152,20 @@ fn run_command_inner(
         }
 
         for change in changes {
-            debug.log(format!("key_change={} pressed={}", change.key, change.pressed));
+            debug.log(format!(
+                "key_change={} pressed={}",
+                change.key, change.pressed
+            ));
             if let Some(binding) = bindings.lookup(change.key) {
                 let snapshot = engine.handle_event(InputEvent {
                     binding,
                     pressed: change.pressed,
                 });
-                debug.log(format!("binding={} pressed={}", binding.label(), change.pressed));
+                debug.log(format!(
+                    "binding={} pressed={}",
+                    binding.label(),
+                    change.pressed
+                ));
                 let status = emitter.emit(&snapshot)?;
                 log_transport_status(&mut debug, "emit", status);
             } else {
@@ -223,7 +235,9 @@ impl DebugLogger {
             .create(true)
             .append(true)
             .open(&path)
-            .with_context(|| format!("failed to open debug log {}", PathBuf::from(path).display()))?;
+            .with_context(|| {
+                format!("failed to open debug log {}", PathBuf::from(path).display())
+            })?;
         Ok(Self { file: Some(file) })
     }
 
@@ -282,17 +296,21 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn default_slippi_path_uses_config_dir() {
-        assert!(platform::default_slippi_user_dir().ends_with(std::path::Path::new("SlippiOnline")));
+        assert!(
+            platform::default_slippi_user_dir().ends_with(std::path::Path::new("SlippiOnline"))
+        );
     }
 
     #[test]
     #[cfg(target_os = "windows")]
     fn default_slippi_path_uses_slippi_launcher_user_dir() {
-        assert!(platform::default_slippi_user_dir().ends_with(
-            std::path::Path::new("Slippi Launcher")
-                .join("netplay")
-                .join("User")
-        ));
+        assert!(
+            platform::default_slippi_user_dir().ends_with(
+                std::path::Path::new("Slippi Launcher")
+                    .join("netplay")
+                    .join("User")
+            )
+        );
     }
 
     #[test]

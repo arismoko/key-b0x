@@ -104,11 +104,72 @@ export type BindingId = (typeof BINDING_IDS)[number];
 
 export type BindingMap = Record<BindingId, NormalizedKey>;
 
+export const SOCD_MODES = [
+  'second_input_priority_no_reactivation',
+  'second_input_priority',
+  'neutral',
+  'dir1_priority',
+  'dir2_priority'
+] as const;
+
+export type SocdMode = (typeof SOCD_MODES)[number];
+
+export interface SocdConfig {
+  main_x: SocdMode;
+  main_y: SocdMode;
+  c_x: SocdMode;
+  c_y: SocdMode;
+}
+
+export const DOWN_DIAGONAL_BEHAVIORS = ['auto_jab_cancel', 'crouch_walk_os'] as const;
+
+export type DownDiagonalBehavior = (typeof DOWN_DIAGONAL_BEHAVIORS)[number];
+
+export const HORIZONTAL_SOCD_OVERRIDES = ['max_jump_trajectory', 'disabled'] as const;
+
+export type HorizontalSocdOverride = (typeof HORIZONTAL_SOCD_OVERRIDES)[number];
+
+export const AIRDODGE_KINDS = ['default', 'custom_mod_x_diagonal'] as const;
+
+export type AirdodgeKind = (typeof AIRDODGE_KINDS)[number];
+
+export type AirdodgeConfig =
+  | {
+      kind: 'default';
+    }
+  | {
+      kind: 'custom_mod_x_diagonal';
+      x: number;
+      y: number;
+    };
+
+export interface MeleeConfig {
+  socd: SocdConfig;
+  down_diagonal: DownDiagonalBehavior;
+  horizontal_socd_override: HorizontalSocdOverride;
+  airdodge: AirdodgeConfig;
+}
+
+export const DEFAULT_MELEE_CONFIG: MeleeConfig = {
+  socd: {
+    main_x: 'second_input_priority_no_reactivation',
+    main_y: 'second_input_priority_no_reactivation',
+    c_x: 'second_input_priority_no_reactivation',
+    c_y: 'second_input_priority_no_reactivation'
+  },
+  down_diagonal: 'auto_jab_cancel',
+  horizontal_socd_override: 'max_jump_trajectory',
+  airdodge: {
+    kind: 'default'
+  }
+};
+
 export interface AppConfig {
   version: typeof CONFIG_VERSION;
   slippi_user_path: string;
   port: typeof SUPPORTED_PORT;
   bindings: BindingMap;
+  melee: MeleeConfig;
 }
 
 export interface SetupStatus {
@@ -310,7 +371,8 @@ export function createDefaultConfig(defaultSlippiUserPath: string): AppConfig {
     version: CONFIG_VERSION,
     slippi_user_path: defaultSlippiUserPath,
     port: SUPPORTED_PORT,
-    bindings: { ...DEFAULT_BINDINGS }
+    bindings: { ...DEFAULT_BINDINGS },
+    melee: cloneMeleeConfig(DEFAULT_MELEE_CONFIG)
   };
 }
 
@@ -343,7 +405,20 @@ export function normalizeConfig(input: unknown, defaultSlippiUserPath: string): 
         ? input.slippi_user_path
         : defaultSlippiUserPath,
     port: SUPPORTED_PORT,
-    bindings
+    bindings,
+    melee: normalizeMeleeConfig(input.melee)
+  };
+}
+
+export function cloneMeleeConfig(melee: MeleeConfig): MeleeConfig {
+  return {
+    socd: { ...melee.socd },
+    down_diagonal: melee.down_diagonal,
+    horizontal_socd_override: melee.horizontal_socd_override,
+    airdodge:
+      melee.airdodge.kind === 'custom_mod_x_diagonal'
+        ? { ...melee.airdodge }
+        : { kind: 'default' }
   };
 }
 
@@ -375,4 +450,66 @@ export function findDuplicateBindings(bindings: BindingMap): Array<{
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeMeleeConfig(input: unknown): MeleeConfig {
+  if (!isRecord(input)) {
+    return cloneMeleeConfig(DEFAULT_MELEE_CONFIG);
+  }
+
+  return {
+    socd: normalizeSocdConfig(input.socd),
+    down_diagonal: isDownDiagonalBehavior(input.down_diagonal)
+      ? input.down_diagonal
+      : DEFAULT_MELEE_CONFIG.down_diagonal,
+    horizontal_socd_override: isHorizontalSocdOverride(input.horizontal_socd_override)
+      ? input.horizontal_socd_override
+      : DEFAULT_MELEE_CONFIG.horizontal_socd_override,
+    airdodge: normalizeAirdodgeConfig(input.airdodge)
+  };
+}
+
+function normalizeSocdConfig(input: unknown): SocdConfig {
+  if (!isRecord(input)) {
+    return { ...DEFAULT_MELEE_CONFIG.socd };
+  }
+
+  return {
+    main_x: isSocdMode(input.main_x) ? input.main_x : DEFAULT_MELEE_CONFIG.socd.main_x,
+    main_y: isSocdMode(input.main_y) ? input.main_y : DEFAULT_MELEE_CONFIG.socd.main_y,
+    c_x: isSocdMode(input.c_x) ? input.c_x : DEFAULT_MELEE_CONFIG.socd.c_x,
+    c_y: isSocdMode(input.c_y) ? input.c_y : DEFAULT_MELEE_CONFIG.socd.c_y
+  };
+}
+
+function normalizeAirdodgeConfig(input: unknown): AirdodgeConfig {
+  if (!isRecord(input)) {
+    return { kind: 'default' };
+  }
+
+  if (input.kind === 'custom_mod_x_diagonal') {
+    return {
+      kind: 'custom_mod_x_diagonal',
+      x: finiteNumberOrFallback(input.x, 0),
+      y: finiteNumberOrFallback(input.y, 0)
+    };
+  }
+
+  return { kind: 'default' };
+}
+
+function finiteNumberOrFallback(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function isSocdMode(value: unknown): value is SocdMode {
+  return (SOCD_MODES as readonly string[]).includes(value as string);
+}
+
+function isDownDiagonalBehavior(value: unknown): value is DownDiagonalBehavior {
+  return (DOWN_DIAGONAL_BEHAVIORS as readonly string[]).includes(value as string);
+}
+
+function isHorizontalSocdOverride(value: unknown): value is HorizontalSocdOverride {
+  return (HORIZONTAL_SOCD_OVERRIDES as readonly string[]).includes(value as string);
 }

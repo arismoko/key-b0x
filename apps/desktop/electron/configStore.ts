@@ -65,8 +65,9 @@ export async function saveConfig(config: AppConfig): Promise<AppConfig> {
     version: CONFIG_VERSION,
     slippi_user_path: normalized.slippi_user_path,
     port: normalized.port,
-    bindings: normalized.bindings
-  });
+    bindings: normalized.bindings,
+    melee: normalized.melee
+  } as any);
 
   await writeFile(configPath, raw, 'utf8');
   return normalized;

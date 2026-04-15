@@ -1,4 +1,4 @@
-import { Menu, app, BrowserWindow, ipcMain } from 'electron';
+import { Menu, app, BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron';
 import path from 'node:path';
 import { AppConfig } from '../shared/model';
 import { checkSetup, loadConfig, saveConfig } from './configStore';
@@ -14,7 +14,7 @@ function createWindow(): void {
     height: 860,
     minWidth: 980,
     minHeight: 760,
-    backgroundColor: '#f3efe7',
+    backgroundColor: '#0b1117',
     title: 'key-b0x',
     autoHideMenuBar: true,
     webPreferences: {
@@ -50,6 +50,23 @@ function registerIpc(): void {
   ipcMain.handle('profile:install', async () => {
     const config = await loadConfig();
     return runtimeService.installProfile(config.slippi_user_path);
+  });
+
+  ipcMain.handle('path:pick-slippi-user', async (_event, currentPath?: string) => {
+    const options: OpenDialogOptions = {
+      title: 'Select Slippi user folder',
+      defaultPath: currentPath,
+      properties: ['openDirectory']
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+
+    if (result.canceled) {
+      return null;
+    }
+
+    return result.filePaths[0] ?? null;
   });
 
   ipcMain.handle('runtime:get-state', async () => runtimeService.getState());
