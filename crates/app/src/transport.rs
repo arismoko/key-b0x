@@ -217,14 +217,8 @@ mod tests {
             ..ControllerSnapshot::neutral()
         });
 
-        assert!(lines.contains(&format!(
-            "SET L {:.6}",
-            encode_trigger(49.0 / 255.0)
-        )));
-        assert!(lines.contains(&format!(
-            "SET R {:.6}",
-            encode_trigger(94.0 / 255.0)
-        )));
+        assert!(lines.contains(&format!("SET L {:.6}", encode_trigger(49.0 / 255.0))));
+        assert!(lines.contains(&format!("SET R {:.6}", encode_trigger(94.0 / 255.0))));
     }
 
     #[test]
@@ -244,5 +238,37 @@ mod tests {
         let status = emitter.emit(&snapshot).unwrap();
         assert_eq!(status, TransportStatus::WaitingForReader);
         assert!(emitter.last_sent.is_none());
+    }
+
+    #[test]
+    fn delayed_connect_resends_full_snapshot_for_held_input() {
+        let transport = MemoryTransport::with_status(TransportStatus::WaitingForReader);
+        let mut emitter = SnapshotEmitter::new(transport);
+        let snapshot = ControllerSnapshot {
+            a: true,
+            main_x: 1.0,
+            ..ControllerSnapshot::neutral()
+        };
+
+        assert_eq!(
+            emitter.emit(&snapshot).unwrap(),
+            TransportStatus::WaitingForReader
+        );
+        assert!(emitter.transport.lines.is_empty());
+
+        emitter.transport.connected = true;
+        emitter.transport.next_status = TransportStatus::NewlyConnected;
+
+        assert_eq!(
+            emitter.emit(&snapshot).unwrap(),
+            TransportStatus::NewlyConnected
+        );
+        assert!(emitter.transport.lines.contains(&"PRESS A".to_string()));
+        assert!(
+            emitter
+                .transport
+                .lines
+                .contains(&"SET MAIN 1.000000 0.500000".to_string())
+        );
     }
 }

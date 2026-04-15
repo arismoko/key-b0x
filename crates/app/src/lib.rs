@@ -87,7 +87,10 @@ impl AppService {
         Ok(setup::check_setup(&resolved))
     }
 
-    pub fn install_profile(&self, slippi_user_path: Option<PathBuf>) -> Result<InstallProfileResult> {
+    pub fn install_profile(
+        &self,
+        slippi_user_path: Option<PathBuf>,
+    ) -> Result<InstallProfileResult> {
         let slippi_user_path = match slippi_user_path {
             Some(path) => path,
             None => self.load_config()?.slippi_user_path,
@@ -218,7 +221,10 @@ mod tests {
         let second = service.start_runtime().unwrap();
 
         assert_eq!(first.status, RuntimeStatus::Starting);
-        assert!(matches!(second.status, RuntimeStatus::Starting | RuntimeStatus::Running));
+        assert!(matches!(
+            second.status,
+            RuntimeStatus::Starting | RuntimeStatus::Running
+        ));
         assert_eq!(start_count.load(Ordering::Relaxed), 1);
 
         for _ in 0..20 {

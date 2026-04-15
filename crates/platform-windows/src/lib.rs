@@ -11,9 +11,10 @@ mod imp {
     use std::mem::{size_of, zeroed};
     use std::path::Path;
     use std::ptr::{null, null_mut};
-    use std::sync::mpsc::{self, Receiver, Sender};
     use std::sync::OnceLock;
+    use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
     use std::thread::{self, JoinHandle};
+    use std::time::{Duration, Instant};
     use windows_sys::Win32::Devices::HumanInterfaceDevice::{
         HID_USAGE_GENERIC_KEYBOARD, HID_USAGE_PAGE_GENERIC,
     };
@@ -30,13 +31,13 @@ mod imp {
     use windows_sys::Win32::UI::Input::{
         GetRawInputData, GetRawInputDeviceInfoW, GetRawInputDeviceList, HRAWINPUT, RAWINPUT,
         RAWINPUTDEVICE, RAWINPUTDEVICELIST, RAWINPUTHEADER, RAWKEYBOARD, RID_INPUT,
-        RIDI_DEVICENAME, RIDEV_INPUTSINK, RIM_TYPEKEYBOARD, RegisterRawInputDevices,
+        RIDEV_INPUTSINK, RIDI_DEVICENAME, RIM_TYPEKEYBOARD, RegisterRawInputDevices,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GWLP_USERDATA,
         GetMessageW, GetWindowLongPtrW, HWND_MESSAGE, MSG, PostMessageW, PostQuitMessage,
-        RI_KEY_BREAK, RI_KEY_E0, RI_KEY_E1, RegisterClassW, SetWindowLongPtrW,
-        TranslateMessage, WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_INPUT, WNDCLASSW,
+        RI_KEY_BREAK, RI_KEY_E0, RI_KEY_E1, RegisterClassW, SetWindowLongPtrW, TranslateMessage,
+        WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_INPUT, WNDCLASSW,
     };
 
     macro_rules! base_scancode_pairs {
@@ -207,8 +208,11 @@ mod imp {
     fn raw_input_devices() -> Result<Vec<RAWINPUTDEVICELIST>> {
         unsafe {
             let mut count = 0u32;
-            let result =
-                GetRawInputDeviceList(null_mut(), &mut count, size_of::<RAWINPUTDEVICELIST>() as u32);
+            let result = GetRawInputDeviceList(
+                null_mut(),
+                &mut count,
+                size_of::<RAWINPUTDEVICELIST>() as u32,
+            );
             if result == u32::MAX {
                 return Err(last_os_error("failed to query raw input device count"));
             }
@@ -234,7 +238,9 @@ mod imp {
         let mut size = 0u32;
         let result = GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, null_mut(), &mut size);
         if result == u32::MAX {
-            return Err(last_os_error("failed to query raw input device name length"));
+            return Err(last_os_error(
+                "failed to query raw input device name length",
+            ));
         }
 
         let mut buffer = vec![0u16; size as usize];
@@ -288,8 +294,18 @@ mod imp {
     }
 
     impl KeyboardCaptureSession for WindowsKeyboardCapture {
-        fn poll_events(&mut self) -> Result<Vec<KeyChange>> {
-            let mut changes = Vec::new();
+        fn wait_for_events(&mut self, timeout: Duration) -> Result<Vec<KeyChange>> {
+            let first_change = match self.rx.recv_timeout(timeout) {
+                Ok(change) => change,
+                Err(RecvTimeoutError::Timeout) => return Ok(Vec::new()),
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(anyhow!("windows raw input thread terminated"));
+                }
+            };
+
+            let mut changes = vec![first_change];
+            // Windows also exposes a merged stream here so runtime input
+            // semantics stay aligned with Linux.
             while let Ok(change) = self.rx.try_recv() {
                 changes.push(change);
             }
@@ -322,7 +338,10 @@ mod imp {
         }
     }
 
-    fn run_raw_input_thread(tx: Sender<KeyChange>, ready_tx: Sender<Result<WindowReady, String>>) -> Result<()> {
+    fn run_raw_input_thread(
+        tx: Sender<KeyChange>,
+        ready_tx: Sender<Result<WindowReady, String>>,
+    ) -> Result<()> {
         unsafe {
             let class_name = match register_window_class() {
                 Ok(class_name) => class_name,
@@ -488,6 +507,7 @@ mod imp {
         Some(KeyChange {
             key,
             pressed: !is_key_release(&keyboard),
+            observed_at: Instant::now(),
         })
     }
 
@@ -565,7 +585,10 @@ mod imp {
                 ) == 0
                 {
                     let error = GetLastError();
-                    if matches!(error, ERROR_BROKEN_PIPE | ERROR_NO_DATA | ERROR_INVALID_HANDLE) {
+                    if matches!(
+                        error,
+                        ERROR_BROKEN_PIPE | ERROR_NO_DATA | ERROR_INVALID_HANDLE
+                    ) {
                         let _ = CloseHandle(handle);
                         self.handle = None;
                         return Ok(TransportStatus::WaitingForReader);
@@ -603,14 +626,23 @@ mod imp {
         #[test]
         fn base_scancodes_map_to_expected_keys() {
             assert_eq!(key_from_base_scancode(0x05), Some(NormalizedKey::Digit4));
-            assert_eq!(key_from_base_scancode(0x1B), Some(NormalizedKey::BracketRight));
+            assert_eq!(
+                key_from_base_scancode(0x1B),
+                Some(NormalizedKey::BracketRight)
+            );
             assert_eq!(key_from_base_scancode(0x2F), Some(NormalizedKey::KeyV));
         }
 
         #[test]
         fn extended_scancodes_map_to_expected_keys() {
-            assert_eq!(key_from_extended_scancode(0x48), Some(NormalizedKey::ArrowUp));
-            assert_eq!(key_from_extended_scancode(0x4D), Some(NormalizedKey::ArrowRight));
+            assert_eq!(
+                key_from_extended_scancode(0x48),
+                Some(NormalizedKey::ArrowUp)
+            );
+            assert_eq!(
+                key_from_extended_scancode(0x4D),
+                Some(NormalizedKey::ArrowRight)
+            );
         }
     }
 }
@@ -623,6 +655,7 @@ mod imp {
         TransportStatus,
     };
     use std::path::Path;
+    use std::time::Duration;
 
     pub struct WindowsKeyboardBackend;
 
@@ -641,7 +674,7 @@ mod imp {
     pub struct WindowsKeyboardCapture;
 
     impl KeyboardCaptureSession for WindowsKeyboardCapture {
-        fn poll_events(&mut self) -> Result<Vec<KeyChange>> {
+        fn wait_for_events(&mut self, _timeout: Duration) -> Result<Vec<KeyChange>> {
             Ok(Vec::new())
         }
 

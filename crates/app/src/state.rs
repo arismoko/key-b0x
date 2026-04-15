@@ -76,7 +76,9 @@ pub fn write_runtime_state(
     listener: Option<&StateListener>,
 ) {
     {
-        let mut guard = state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *guard = next.clone();
     }
 

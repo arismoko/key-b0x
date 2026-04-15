@@ -143,10 +143,7 @@ pub fn save(path: &Path, config: &AppConfig) -> Result<()> {
 
 pub fn prepare(config: AppConfig) -> Result<AppConfig> {
     let config = config.normalize();
-    config
-        .melee
-        .validate()
-        .context("invalid melee settings")?;
+    config.melee.validate().context("invalid melee settings")?;
     Ok(config)
 }
 
@@ -337,7 +334,10 @@ analog_up = "KEY_RIGHTBRACE"
         let config = load(&config_path).unwrap();
 
         assert_eq!(config.version, CONFIG_VERSION);
-        assert_eq!(config.bindings[&BindingId::AnalogUp], NormalizedKey::BracketRight);
+        assert_eq!(
+            config.bindings[&BindingId::AnalogUp],
+            NormalizedKey::BracketRight
+        );
         let rewritten = fs::read_to_string(config_path).unwrap();
         assert!(rewritten.contains("version = 2"));
         assert!(rewritten.contains("analog_up = \"BracketRight\""));

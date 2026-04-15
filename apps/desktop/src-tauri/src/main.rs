@@ -110,10 +110,7 @@ fn with_service<T>(
     f(&mut service).map_err(string_error)
 }
 
-fn with_service_state<T>(
-    state: &State<'_, AppState>,
-    f: impl FnOnce(&mut AppService) -> T,
-) -> T {
+fn with_service_state<T>(state: &State<'_, AppState>, f: impl FnOnce(&mut AppService) -> T) -> T {
     let mut service = state
         .service
         .lock()

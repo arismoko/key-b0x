@@ -6,12 +6,15 @@ use key_b0x_platform::{
     KeyChange, KeyboardBackend, KeyboardCaptureSession, KeyboardId, KeyboardInfo, NormalizedKey,
     SlippiTransport, TransportStatus,
 };
+use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::sys::stat::Mode;
 use nix::unistd::mkfifo;
 use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Write};
+use std::os::fd::AsFd;
 use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 macro_rules! normalized_key_pairs {
     ($(($normalized:ident, $evdev:ident)),+ $(,)?) => {
@@ -131,6 +134,8 @@ impl KeyboardBackend for LinuxKeyboardBackend {
     }
 
     fn open(&self) -> Result<Self::Session> {
+        // Linux intentionally mirrors Windows here: capture every detected
+        // keyboard and merge all events into one logical input stream.
         LinuxKeyboardCapture::open_all(self.list_keyboards()?)
     }
 }
@@ -194,11 +199,11 @@ impl LinuxKeyboardCapture {
 
         Ok(Self { devices })
     }
-}
 
-impl KeyboardCaptureSession for LinuxKeyboardCapture {
-    fn poll_events(&mut self) -> Result<Vec<KeyChange>> {
+    fn drain_available_events(&mut self) -> Result<Vec<KeyChange>> {
         let mut changes = Vec::new();
+        // We deliberately flatten all captured devices into a single stream of
+        // key transitions. The runtime does not preserve keyboard identity.
         for device in &mut self.devices {
             let events = match device.fetch_events() {
                 Ok(events) => events,
@@ -215,8 +220,13 @@ impl KeyboardCaptureSession for LinuxKeyboardCapture {
                         0 => changes.push(KeyChange {
                             key,
                             pressed: false,
+                            observed_at: Instant::now(),
                         }),
-                        1 => changes.push(KeyChange { key, pressed: true }),
+                        1 => changes.push(KeyChange {
+                            key,
+                            pressed: true,
+                            observed_at: Instant::now(),
+                        }),
                         _ => {}
                     }
                 }
@@ -224,6 +234,37 @@ impl KeyboardCaptureSession for LinuxKeyboardCapture {
         }
 
         Ok(changes)
+    }
+}
+
+impl KeyboardCaptureSession for LinuxKeyboardCapture {
+    fn wait_for_events(&mut self, timeout: Duration) -> Result<Vec<KeyChange>> {
+        let mut poll_fds = self
+            .devices
+            .iter()
+            .map(|device| PollFd::new(device.as_fd(), PollFlags::POLLIN))
+            .collect::<Vec<_>>();
+
+        let ready = poll(
+            &mut poll_fds,
+            PollTimeout::try_from(timeout).unwrap_or(PollTimeout::MAX),
+        )
+        .context("failed to wait for keyboard events")?;
+
+        if ready == 0 {
+            return Ok(Vec::new());
+        }
+
+        for poll_fd in &poll_fds {
+            let Some(events) = poll_fd.revents() else {
+                continue;
+            };
+            if events.intersects(PollFlags::POLLERR | PollFlags::POLLHUP | PollFlags::POLLNVAL) {
+                return Err(anyhow!("keyboard device became unavailable"));
+            }
+        }
+
+        self.drain_available_events()
     }
 
     fn release(&mut self) -> Result<()> {
@@ -263,7 +304,7 @@ impl LinuxFifoTransport {
         &self.pipe_path
     }
 
-    pub fn ensure_fifo(&self) -> Result<()> {
+    fn ensure_fifo(&self) -> Result<()> {
         let parent = self
             .pipe_path
             .parent()
@@ -291,6 +332,8 @@ impl SlippiTransport for LinuxFifoTransport {
         if self.file.is_some() {
             return Ok(TransportStatus::Connected);
         }
+
+        self.ensure_fifo()?;
 
         match OpenOptions::new()
             .write(true)
@@ -359,10 +402,21 @@ mod tests {
     fn connect_waits_when_reader_is_missing() {
         let temp = tempfile::tempdir().unwrap();
         let mut transport = LinuxFifoTransport::new(temp.path(), 1).unwrap();
-        transport.ensure_fifo().unwrap();
 
         let status = transport.ensure_connected().unwrap();
         assert_eq!(status, TransportStatus::WaitingForReader);
+    }
+
+    #[test]
+    fn connect_creates_fifo_on_clean_install() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut transport = LinuxFifoTransport::new(temp.path(), 1).unwrap();
+
+        let status = transport.ensure_connected().unwrap();
+        assert_eq!(status, TransportStatus::WaitingForReader);
+
+        let meta = fs::metadata(transport.pipe_path()).unwrap();
+        assert!(meta.file_type().is_fifo());
     }
 
     #[test]

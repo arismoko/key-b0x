@@ -53,6 +53,7 @@ const IDLE_RUNTIME: RuntimeState = {
   lastError: null
 };
 const TOAST_LIFETIME_MS = 3200;
+const WAITING_FOR_SLIPPI_TOAST_ID = -1;
 const SOCD_MODE_OPTIONS: SelectOption<SocdMode>[] = [
   {
     value: 'second_input_priority_no_reactivation',
@@ -812,7 +813,7 @@ function App() {
         </div>
       ) : null}
 
-      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
+      <ToastViewport toasts={toasts} runtimeStatus={runtime.status} onDismiss={dismissToast} />
     </div>
   );
 }
@@ -1207,28 +1208,47 @@ function BindingsSection({
 
 function ToastViewport({
   toasts,
+  runtimeStatus,
   onDismiss
 }: {
   toasts: Toast[];
+  runtimeStatus: RuntimeState['status'];
   onDismiss: (id: number) => void;
 }) {
-  if (toasts.length === 0) {
+  const waitingToast =
+    runtimeStatus === 'waiting_for_slippi'
+      ? {
+          id: WAITING_FOR_SLIPPI_TOAST_ID,
+          message: 'Try restarting Slippi/Dolphin.',
+          tone: 'warning' as const,
+          persistent: true
+        }
+      : null;
+
+  const allToasts = waitingToast ? [waitingToast, ...toasts] : toasts;
+
+  if (allToasts.length === 0) {
     return null;
   }
 
   return (
     <div className="toast-viewport" aria-live="polite" aria-atomic="true">
-      {toasts.map((toast) => (
-        <div key={toast.id} className={`toast toast-${toast.tone}`}>
+      {allToasts.map((toast) => (
+        <div
+          key={toast.id}
+          className={`toast toast-${toast.tone}${'persistent' in toast && toast.persistent ? ' toast-persistent' : ''}`}
+        >
           <div className="toast-message">{toast.message}</div>
-          <button
-            type="button"
-            className="toast-dismiss"
-            aria-label="Dismiss notification"
-            onClick={() => onDismiss(toast.id)}
-          >
-            x
-          </button>
+          {'persistent' in toast && toast.persistent ? null : (
+            <button
+              type="button"
+              className="toast-dismiss"
+              aria-label="Dismiss notification"
+              onClick={() => onDismiss(toast.id)}
+            >
+              x
+            </button>
+          )}
         </div>
       ))}
     </div>

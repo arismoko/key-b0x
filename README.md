@@ -1,9 +1,10 @@
 # key-b0x
 
-`key-b0x` is a cross-platform Slippi keyboard controller desktop app. It keeps
-the existing React product surface in `apps/desktop/src`, runs the capture and
-transport loop in-process through Tauri, and writes directly to Slippi's pipe
-controller backend instead of creating a virtual gamepad.
+`key-b0x` is a cross-platform Slippi keyboard controller desktop app. It writes directly to Slippi's pipe controller backend instead of creating a virtual gamepad. This means you just need to download one executable to get up and running.
+
+I made this because the other solutions typically require the user to fuss around with outdated drivers and autohotkey. This is a user friendly way to avoid all that for people who just want to play on Slippi with their keyboard.
+
+I intend on adding Project M support/general dolphin support in the future but for now this is just targeting Slippi/Ishiiruka.
 
 The native stack is split into:
 

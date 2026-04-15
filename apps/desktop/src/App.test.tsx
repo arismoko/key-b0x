@@ -198,6 +198,7 @@ describe('App', () => {
     });
 
     expect(screen.getByText('Waiting for Slippi')).toBeTruthy();
+    expect(screen.getByText('Try restarting Slippi/Dolphin.')).toBeTruthy();
   });
 
   it('marks onboarding complete after the profile instructions step', async () => {

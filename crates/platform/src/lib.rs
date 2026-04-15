@@ -2,6 +2,7 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
+use std::time::{Duration, Instant};
 
 macro_rules! normalized_keys {
     ($($name:ident),+ $(,)?) => {
@@ -157,14 +158,19 @@ pub struct KeyboardInfo {
     pub name: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// Input from every captured keyboard is merged into one logical stream on
+// purpose. We do not track per-device identity in runtime input handling,
+// because the controller model is global and we want the same semantics on
+// Linux and Windows.
+#[derive(Clone, Debug)]
 pub struct KeyChange {
     pub key: NormalizedKey,
     pub pressed: bool,
+    pub observed_at: Instant,
 }
 
 pub trait KeyboardCaptureSession {
-    fn poll_events(&mut self) -> Result<Vec<KeyChange>>;
+    fn wait_for_events(&mut self, timeout: Duration) -> Result<Vec<KeyChange>>;
     fn release(&mut self) -> Result<()>;
 }
 
@@ -203,6 +209,9 @@ mod tests {
     #[test]
     fn keyboard_id_rejects_empty_values() {
         assert!("".parse::<KeyboardId>().is_err());
-        assert_eq!("keyboard-1".parse::<KeyboardId>().unwrap().as_str(), "keyboard-1");
+        assert_eq!(
+            "keyboard-1".parse::<KeyboardId>().unwrap().as_str(),
+            "keyboard-1"
+        );
     }
 }

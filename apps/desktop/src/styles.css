@@ -313,9 +313,9 @@ select {
 
 .toast-viewport {
   position: absolute;
-  top: 18px;
+  top: 72px;
   right: 18px;
-  z-index: 6;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -352,6 +352,10 @@ select {
 
 .toast-error {
   border-left-color: var(--danger);
+}
+
+.toast-persistent {
+  animation: none;
 }
 
 .toast-message {

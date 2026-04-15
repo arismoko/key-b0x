@@ -7,8 +7,7 @@ use key_b0x_platform_linux::{
 };
 #[cfg(target_os = "windows")]
 use key_b0x_platform_windows::{
-    WindowsKeyboardBackend as ActiveKeyboardBackend,
-    WindowsNamedPipeTransport as ActiveTransport,
+    WindowsKeyboardBackend as ActiveKeyboardBackend, WindowsNamedPipeTransport as ActiveTransport,
 };
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
