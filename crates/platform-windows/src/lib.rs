@@ -1,42 +1,11 @@
-fn keyboard_candidate_score(id: &str) -> u8 {
-    let upper = id.to_ascii_uppercase();
-    if upper.contains("RDP_KBD") {
-        return 0;
-    }
-    if upper.contains("CONVERTEDDEVICE&COL01") {
-        return 5;
-    }
-    if upper.contains("COL01") {
-        return 4;
-    }
-    if upper.contains("HPQ8001") {
-        return 1;
-    }
-    if upper.starts_with(r"\\?\ACPI#") || upper.starts_with(r"ACPI\") {
-        return 2;
-    }
-    3
-}
-
-fn choose_auto_keyboard(keyboards: &[key_b0x_platform::KeyboardInfo]) -> Option<key_b0x_platform::KeyboardInfo> {
-    keyboards
-        .iter()
-        .max_by(|lhs, rhs| {
-            keyboard_candidate_score(lhs.id.as_str())
-                .cmp(&keyboard_candidate_score(rhs.id.as_str()))
-                .then_with(|| lhs.id.cmp(&rhs.id))
-        })
-        .cloned()
-}
-
 #[cfg(windows)]
 mod imp {
     #![allow(unsafe_op_in_unsafe_fn)]
 
     use anyhow::{Result, anyhow, bail};
     use key_b0x_platform::{
-        BackendCapabilities, KeyChange, KeyboardBackend, KeyboardCaptureSession, KeyboardId,
-        KeyboardInfo, NormalizedKey, SlippiTransport, TransportStatus,
+        KeyChange, KeyboardBackend, KeyboardCaptureSession, KeyboardId, KeyboardInfo,
+        NormalizedKey, SlippiTransport, TransportStatus,
     };
     use std::ffi::c_void;
     use std::mem::{size_of, zeroed};
@@ -212,22 +181,8 @@ mod imp {
             enumerate_keyboards()
         }
 
-        fn auto_detect_keyboard(&self) -> Result<Option<KeyboardInfo>> {
-            let keyboards = enumerate_keyboards()?;
-            Ok(super::choose_auto_keyboard(&keyboards))
-        }
-
-        fn open(&self, id: &KeyboardId, exclusive: bool) -> Result<Self::Session> {
-            if exclusive {
-                bail!("exclusive keyboard capture is not supported on Windows");
-            }
-            WindowsKeyboardCapture::open(id)
-        }
-
-        fn capabilities(&self) -> BackendCapabilities {
-            BackendCapabilities {
-                exclusive_capture: false,
-            }
+        fn open(&self) -> Result<Self::Session> {
+            WindowsKeyboardCapture::open()
         }
     }
 
@@ -299,7 +254,6 @@ mod imp {
     }
 
     pub struct WindowsKeyboardCapture {
-        info: KeyboardInfo,
         rx: Receiver<KeyChange>,
         hwnd: HWND,
         thread: Option<JoinHandle<()>>,
@@ -307,11 +261,10 @@ mod imp {
     }
 
     impl WindowsKeyboardCapture {
-        pub fn open(id: &KeyboardId) -> Result<Self> {
-            let info = enumerate_keyboards()?
-                .into_iter()
-                .find(|keyboard| &keyboard.id == id)
-                .ok_or_else(|| anyhow!("keyboard {} is not available", id))?;
+        pub fn open() -> Result<Self> {
+            if enumerate_keyboards()?.is_empty() {
+                bail!("no keyboards detected");
+            }
 
             let (events_tx, events_rx) = mpsc::channel();
             let (ready_tx, ready_rx) = mpsc::channel();
@@ -326,7 +279,6 @@ mod imp {
                 .map_err(|err| anyhow!(err))?;
 
             Ok(Self {
-                info,
                 rx: events_rx,
                 hwnd: ready.hwnd as HWND,
                 thread: Some(thread),
@@ -336,10 +288,6 @@ mod imp {
     }
 
     impl KeyboardCaptureSession for WindowsKeyboardCapture {
-        fn info(&self) -> &KeyboardInfo {
-            &self.info
-        }
-
         fn poll_events(&mut self) -> Result<Vec<KeyChange>> {
             let mut changes = Vec::new();
             while let Ok(change) = self.rx.try_recv() {
@@ -671,8 +619,8 @@ mod imp {
 mod imp {
     use anyhow::{Result, bail};
     use key_b0x_platform::{
-        BackendCapabilities, KeyChange, KeyboardBackend, KeyboardCaptureSession, KeyboardId,
-        KeyboardInfo, SlippiTransport, TransportStatus,
+        KeyChange, KeyboardBackend, KeyboardCaptureSession, KeyboardInfo, SlippiTransport,
+        TransportStatus,
     };
     use std::path::Path;
 
@@ -693,10 +641,6 @@ mod imp {
     pub struct WindowsKeyboardCapture;
 
     impl KeyboardCaptureSession for WindowsKeyboardCapture {
-        fn info(&self) -> &KeyboardInfo {
-            panic!("WindowsKeyboardCapture is unavailable on non-Windows targets");
-        }
-
         fn poll_events(&mut self) -> Result<Vec<KeyChange>> {
             Ok(Vec::new())
         }
@@ -713,18 +657,8 @@ mod imp {
             Ok(Vec::new())
         }
 
-        fn auto_detect_keyboard(&self) -> Result<Option<KeyboardInfo>> {
-            Ok(None)
-        }
-
-        fn open(&self, _id: &KeyboardId, _exclusive: bool) -> Result<Self::Session> {
+        fn open(&self) -> Result<Self::Session> {
             bail!("Windows keyboard capture is only available on Windows")
-        }
-
-        fn capabilities(&self) -> BackendCapabilities {
-            BackendCapabilities {
-                exclusive_capture: false,
-            }
         }
     }
 
@@ -748,39 +682,3 @@ mod imp {
 }
 
 pub use imp::*;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use key_b0x_platform::{KeyboardId, KeyboardInfo};
-
-    fn keyboard(id: &str) -> KeyboardInfo {
-        KeyboardInfo {
-            id: KeyboardId::new(id),
-            name: id.to_string(),
-        }
-    }
-
-    #[test]
-    fn prefers_converted_device_keyboard_for_auto_detection() {
-        let keyboards = vec![
-            keyboard(r"\\?\ACPI#HPQ8001#4&3822e7db&0#{...}"),
-            keyboard(r"\\?\HID#ConvertedDevice&Col01#5&b5a182d&0&0000#{...}"),
-            keyboard(r"\\?\HID#VID_1532&PID_00AB&MI_01&Col01#7&206076e&0&0000#{...}"),
-        ];
-
-        let selected = choose_auto_keyboard(&keyboards).unwrap();
-        assert!(selected.id.as_str().contains("ConvertedDevice&Col01"));
-    }
-
-    #[test]
-    fn de_prioritizes_remote_desktop_keyboard() {
-        let keyboards = vec![
-            keyboard(r"\\?\ROOT#RDP_KBD#0000#{...}"),
-            keyboard(r"\\?\HID#VID_1532&PID_00AB&MI_01&Col01#7&206076e&0&0000#{...}"),
-        ];
-
-        let selected = choose_auto_keyboard(&keyboards).unwrap();
-        assert!(selected.id.as_str().contains("VID_1532"));
-    }
-}

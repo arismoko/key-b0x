@@ -163,13 +163,7 @@ pub struct KeyChange {
     pub pressed: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct BackendCapabilities {
-    pub exclusive_capture: bool,
-}
-
 pub trait KeyboardCaptureSession {
-    fn info(&self) -> &KeyboardInfo;
     fn poll_events(&mut self) -> Result<Vec<KeyChange>>;
     fn release(&mut self) -> Result<()>;
 }
@@ -178,9 +172,7 @@ pub trait KeyboardBackend {
     type Session: KeyboardCaptureSession;
 
     fn list_keyboards(&self) -> Result<Vec<KeyboardInfo>>;
-    fn auto_detect_keyboard(&self) -> Result<Option<KeyboardInfo>>;
-    fn open(&self, id: &KeyboardId, exclusive: bool) -> Result<Self::Session>;
-    fn capabilities(&self) -> BackendCapabilities;
+    fn open(&self) -> Result<Self::Session>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

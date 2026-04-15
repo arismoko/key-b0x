@@ -12,7 +12,5 @@ Planned stack:
 Planned responsibilities:
 
 - edit bindings
-- choose a keyboard
-- toggle exclusive capture
 - install/check the Slippi profile
 - start and stop the Rust runtime

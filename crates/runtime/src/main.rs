@@ -3,13 +3,11 @@ mod platform;
 mod profile;
 mod transport;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use config::{AppConfig, default_config_path, load_or_create, render_default};
 use key_b0x_core::{B0xxEngine, BindingId, InputEvent};
-use key_b0x_platform::{
-    BackendCapabilities, KeyboardBackend, KeyboardCaptureSession, KeyboardId, NormalizedKey,
-};
+use key_b0x_platform::{KeyboardBackend, KeyboardCaptureSession, NormalizedKey, TransportStatus};
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -21,7 +19,6 @@ use std::sync::{
 };
 use std::thread;
 use std::time::Duration;
-use key_b0x_platform::TransportStatus;
 use transport::SnapshotEmitter;
 
 #[derive(Parser)]
@@ -43,11 +40,6 @@ enum Command {
         slippi_user_path: Option<PathBuf>,
     },
     Run {
-        #[arg(long)]
-        keyboard: Option<KeyboardId>,
-        #[cfg(target_os = "linux")]
-        #[arg(long)]
-        grab: bool,
         #[arg(long)]
         slippi_user_path: Option<PathBuf>,
     },
@@ -71,68 +63,30 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        #[cfg(target_os = "linux")]
-        Command::Run {
-            keyboard,
-            grab,
-            slippi_user_path,
-        } => run_command(cli.config, keyboard, grab, slippi_user_path),
-        #[cfg(target_os = "windows")]
-        Command::Run {
-            keyboard,
-            slippi_user_path,
-        } => run_command(cli.config, keyboard, slippi_user_path),
+        Command::Run { slippi_user_path } => run_command(cli.config, slippi_user_path),
     }
 }
 
 fn list_keyboards_command() -> Result<()> {
     let backend = platform::active_keyboard_backend();
-    let auto = backend.auto_detect_keyboard()?.map(|keyboard| keyboard.id);
     let keyboards = backend.list_keyboards()?;
     if keyboards.is_empty() {
         bail!("no keyboards detected");
     }
 
     for keyboard in keyboards {
-        let marker = if auto.as_ref() == Some(&keyboard.id) {
-            "*"
-        } else {
-            " "
-        };
-        println!("{marker} {}  {}", keyboard.id, keyboard.name);
+        println!("{}  {}", keyboard.id, keyboard.name);
     }
 
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
-fn run_command(
-    config_override: Option<PathBuf>,
-    keyboard_override: Option<KeyboardId>,
-    grab_override: bool,
-    slippi_user_override: Option<PathBuf>,
-) -> Result<()> {
-    run_command_inner(
-        config_override,
-        keyboard_override,
-        grab_override,
-        slippi_user_override,
-    )
-}
-
-#[cfg(target_os = "windows")]
-fn run_command(
-    config_override: Option<PathBuf>,
-    keyboard_override: Option<KeyboardId>,
-    slippi_user_override: Option<PathBuf>,
-) -> Result<()> {
-    run_command_inner(config_override, keyboard_override, false, slippi_user_override)
+fn run_command(config_override: Option<PathBuf>, slippi_user_override: Option<PathBuf>) -> Result<()> {
+    run_command_inner(config_override, slippi_user_override)
 }
 
 fn run_command_inner(
     config_override: Option<PathBuf>,
-    keyboard_override: Option<KeyboardId>,
-    grab_override: bool,
     slippi_user_override: Option<PathBuf>,
 ) -> Result<()> {
     let mut debug = DebugLogger::from_env()?;
@@ -149,22 +103,24 @@ fn run_command_inner(
     }
 
     let backend = platform::active_keyboard_backend();
-    let keyboard_id = resolve_keyboard_id(keyboard_override, &config, &backend)?;
-    let exclusive_capture = effective_exclusive_capture(grab_override, &config, backend.capabilities());
+    let keyboards = backend.list_keyboards()?;
+    if keyboards.is_empty() {
+        bail!("no keyboards detected");
+    }
     let bindings = ResolvedBindings::new(&config)?;
-    debug.log(format!("keyboard_id={keyboard_id}"));
+    debug.log(format!("keyboard_count={}", keyboards.len()));
     debug.log(format!(
         "slippi_user_path={}",
         config.slippi_user_path.display()
     ));
 
-    let mut capture = backend.open(&keyboard_id, exclusive_capture)?;
+    let mut capture = backend.open()?;
     let mut emitter = SnapshotEmitter::new(platform::active_transport(&config.slippi_user_path, 1)?);
     let stop = Arc::new(AtomicBool::new(false));
     register_signals(&stop)?;
 
-    println!("Using keyboard: {}", capture.info().id);
-    println!("Keyboard name: {}", capture.info().name);
+    println!("Keyboard capture: all detected keyboards");
+    println!("Keyboard count: {}", keyboards.len());
     println!("Slippi user path: {}", config.slippi_user_path.display());
     #[cfg(target_os = "linux")]
     println!(
@@ -177,10 +133,6 @@ fn run_command_inner(
     );
     #[cfg(target_os = "windows")]
     println!("Pipe name: \\\\.\\pipe\\slippibot1");
-    if exclusive_capture {
-        println!("Exclusive capture enabled");
-    }
-    debug.log(format!("capture_name={}", capture.info().name));
 
     let mut engine = B0xxEngine::new();
     let startup_status = emitter.emit(&engine.snapshot())?;
@@ -230,33 +182,6 @@ fn register_signals(stop: &Arc<AtomicBool>) -> Result<()> {
     signal_hook::flag::register(SIGINT, Arc::clone(stop)).context("failed to register SIGINT")?;
     signal_hook::flag::register(SIGTERM, Arc::clone(stop)).context("failed to register SIGTERM")?;
     Ok(())
-}
-
-fn resolve_keyboard_id<B: KeyboardBackend>(
-    override_id: Option<KeyboardId>,
-    config: &AppConfig,
-    backend: &B,
-) -> Result<KeyboardId> {
-    if let Some(id) = override_id {
-        return Ok(id);
-    }
-    if let Some(id) = config.keyboard_device.clone() {
-        return Ok(id);
-    }
-    if let Some(keyboard) = backend.auto_detect_keyboard()? {
-        return Ok(keyboard.id);
-    }
-    Err(anyhow!(
-        "no keyboard selected and auto-detection did not find a suitable device"
-    ))
-}
-
-fn effective_exclusive_capture(
-    grab_override: bool,
-    config: &AppConfig,
-    capabilities: BackendCapabilities,
-) -> bool {
-    capabilities.exclusive_capture && (grab_override || config.exclusive_capture)
 }
 
 struct DebugLogger {
@@ -317,45 +242,6 @@ impl ResolvedBindings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use key_b0x_platform::{BackendCapabilities, KeyChange, KeyboardInfo};
-
-    struct FakeBackend;
-
-    struct FakeCapture;
-
-    impl KeyboardCaptureSession for FakeCapture {
-        fn info(&self) -> &KeyboardInfo {
-            panic!("unused")
-        }
-
-        fn poll_events(&mut self) -> Result<Vec<KeyChange>> {
-            Ok(Vec::new())
-        }
-
-        fn release(&mut self) -> Result<()> {
-            Ok(())
-        }
-    }
-
-    impl KeyboardBackend for FakeBackend {
-        type Session = FakeCapture;
-
-        fn list_keyboards(&self) -> Result<Vec<KeyboardInfo>> {
-            Ok(Vec::new())
-        }
-
-        fn auto_detect_keyboard(&self) -> Result<Option<KeyboardInfo>> {
-            Ok(None)
-        }
-
-        fn open(&self, _id: &KeyboardId, _exclusive: bool) -> Result<Self::Session> {
-            Ok(FakeCapture)
-        }
-
-        fn capabilities(&self) -> BackendCapabilities {
-            BackendCapabilities::default()
-        }
-    }
 
     #[test]
     fn resolved_bindings_reject_duplicates() {
@@ -364,13 +250,6 @@ mod tests {
         config.bindings.insert(BindingId::B, NormalizedKey::KeyM);
 
         assert!(ResolvedBindings::new(&config).is_err());
-    }
-
-    #[test]
-    fn resolve_keyboard_prefers_override() {
-        let config = AppConfig::default();
-        let resolved = resolve_keyboard_id(Some(KeyboardId::new("keyboard-99")), &config, &FakeBackend);
-        assert_eq!(resolved.unwrap().as_str(), "keyboard-99");
     }
 
     #[test]

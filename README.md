@@ -40,7 +40,8 @@ cargo run -p key-b0x-runtime -- run
   `~/.config/SlippiOnline/Config/Profiles/GCPad/key-b0x.ini` on Linux and
   `%APPDATA%\Slippi Launcher\netplay\User\Config\Profiles\GCPad\key-b0x.ini`
   on Windows
-- Linux supports optional exclusive keyboard grab; Windows does not
+- Both Linux and Windows capture from all active keyboards in the current
+  session
 - You still need to load the `key-b0x` profile in Slippi's controller UI
 
 ## Next Steps

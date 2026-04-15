@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow, bail};
 use key_b0x_core::BindingId;
-use key_b0x_platform::{KeyboardId, NormalizedKey};
+use key_b0x_platform::NormalizedKey;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -14,10 +14,6 @@ pub struct AppConfig {
     pub version: u8,
     #[serde(default = "default_slippi_user_path")]
     pub slippi_user_path: PathBuf,
-    #[serde(default)]
-    pub keyboard_device: Option<KeyboardId>,
-    #[serde(default = "default_exclusive_capture")]
-    pub exclusive_capture: bool,
     #[serde(default = "default_port")]
     pub port: u8,
     #[serde(default = "default_bindings")]
@@ -29,8 +25,6 @@ impl Default for AppConfig {
         Self {
             version: default_version(),
             slippi_user_path: default_slippi_user_path(),
-            keyboard_device: None,
-            exclusive_capture: default_exclusive_capture(),
             port: default_port(),
             bindings: default_bindings(),
         }
@@ -119,10 +113,6 @@ fn default_version() -> u8 {
     CONFIG_VERSION
 }
 
-fn default_exclusive_capture() -> bool {
-    false
-}
-
 fn default_port() -> u8 {
     1
 }
@@ -169,7 +159,6 @@ mod tests {
         let config = AppConfig::default();
         assert_eq!(config.bindings.len(), BindingId::ALL.len());
         assert_eq!(config.port, 1);
-        assert!(!config.exclusive_capture);
         assert_eq!(config.bindings[&BindingId::AnalogUp], NormalizedKey::BracketRight);
     }
 
@@ -192,7 +181,6 @@ mod tests {
             r#"
 version = 1
 slippi_user_path = "/tmp/SlippiOnline"
-exclusive_capture = false
 port = 1
 
 [bindings]

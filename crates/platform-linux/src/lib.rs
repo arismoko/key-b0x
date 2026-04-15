@@ -3,8 +3,8 @@
 use anyhow::{Context, Result, anyhow, bail};
 use evdev::{Device, EventSummary, KeyCode, enumerate};
 use key_b0x_platform::{
-    BackendCapabilities, KeyChange, KeyboardBackend, KeyboardCaptureSession, KeyboardId,
-    KeyboardInfo, NormalizedKey, SlippiTransport, TransportStatus,
+    KeyChange, KeyboardBackend, KeyboardCaptureSession, KeyboardId, KeyboardInfo, NormalizedKey,
+    SlippiTransport, TransportStatus,
 };
 use nix::sys::stat::Mode;
 use nix::unistd::mkfifo;
@@ -126,26 +126,12 @@ impl KeyboardBackend for LinuxKeyboardBackend {
             .collect::<Vec<_>>();
 
         keyboards.sort_by(|lhs, rhs| lhs.id.cmp(&rhs.id));
+        keyboards.dedup_by(|lhs, rhs| lhs.id == rhs.id);
         Ok(keyboards)
     }
 
-    fn auto_detect_keyboard(&self) -> Result<Option<KeyboardInfo>> {
-        let keyboards = self.list_keyboards()?;
-        Ok(keyboards
-            .iter()
-            .find(|keyboard| keyboard.name.eq_ignore_ascii_case("keyd virtual keyboard"))
-            .cloned()
-            .or_else(|| keyboards.into_iter().next()))
-    }
-
-    fn open(&self, id: &KeyboardId, exclusive: bool) -> Result<Self::Session> {
-        LinuxKeyboardCapture::open(id, exclusive)
-    }
-
-    fn capabilities(&self) -> BackendCapabilities {
-        BackendCapabilities {
-            exclusive_capture: true,
-        }
+    fn open(&self) -> Result<Self::Session> {
+        LinuxKeyboardCapture::open_all(self.list_keyboards()?)
     }
 }
 
@@ -186,63 +172,53 @@ fn preferred_keyboard_path(path: &Path) -> Option<PathBuf> {
 }
 
 pub struct LinuxKeyboardCapture {
-    device: Device,
-    info: KeyboardInfo,
-    grabbed: bool,
+    devices: Vec<Device>,
 }
 
 impl LinuxKeyboardCapture {
-    pub fn open(id: &KeyboardId, exclusive: bool) -> Result<Self> {
-        let path = Path::new(id.as_str());
-        let mut device = Device::open(path)
-            .with_context(|| format!("failed to open keyboard device {}", path.display()))?;
-        device
-            .set_nonblocking(true)
-            .with_context(|| format!("failed to configure {}", path.display()))?;
-        if exclusive {
-            device
-                .grab()
-                .with_context(|| format!("failed to grab {}", path.display()))?;
+    pub fn open_all(keyboards: Vec<KeyboardInfo>) -> Result<Self> {
+        if keyboards.is_empty() {
+            bail!("no keyboards detected");
         }
 
-        let info = KeyboardInfo {
-            id: id.clone(),
-            name: device.name().unwrap_or("Unnamed keyboard").to_string(),
-        };
+        let mut devices = Vec::with_capacity(keyboards.len());
+        for keyboard in keyboards {
+            let path = Path::new(keyboard.id.as_str());
+            let device = Device::open(path)
+                .with_context(|| format!("failed to open keyboard device {}", path.display()))?;
+            device
+                .set_nonblocking(true)
+                .with_context(|| format!("failed to configure {}", path.display()))?;
+            devices.push(device);
+        }
 
-        Ok(Self {
-            device,
-            info,
-            grabbed: exclusive,
-        })
+        Ok(Self { devices })
     }
 }
 
 impl KeyboardCaptureSession for LinuxKeyboardCapture {
-    fn info(&self) -> &KeyboardInfo {
-        &self.info
-    }
-
     fn poll_events(&mut self) -> Result<Vec<KeyChange>> {
-        let events = match self.device.fetch_events() {
-            Ok(events) => events,
-            Err(err) if err.kind() == ErrorKind::WouldBlock => return Ok(Vec::new()),
-            Err(err) => return Err(err).context("failed to read keyboard events"),
-        };
-
         let mut changes = Vec::new();
-        for event in events {
-            if let EventSummary::Key(_, code, value) = event.destructure() {
-                let Some(key) = normalized_key_from_code(code) else {
-                    continue;
-                };
-                match value {
-                    0 => changes.push(KeyChange {
-                        key,
-                        pressed: false,
-                    }),
-                    1 => changes.push(KeyChange { key, pressed: true }),
-                    _ => {}
+        for device in &mut self.devices {
+            let events = match device.fetch_events() {
+                Ok(events) => events,
+                Err(err) if err.kind() == ErrorKind::WouldBlock => continue,
+                Err(err) => return Err(err).context("failed to read keyboard events"),
+            };
+
+            for event in events {
+                if let EventSummary::Key(_, code, value) = event.destructure() {
+                    let Some(key) = normalized_key_from_code(code) else {
+                        continue;
+                    };
+                    match value {
+                        0 => changes.push(KeyChange {
+                            key,
+                            pressed: false,
+                        }),
+                        1 => changes.push(KeyChange { key, pressed: true }),
+                        _ => {}
+                    }
                 }
             }
         }
@@ -251,10 +227,6 @@ impl KeyboardCaptureSession for LinuxKeyboardCapture {
     }
 
     fn release(&mut self) -> Result<()> {
-        if self.grabbed {
-            self.device.ungrab().context("failed to ungrab keyboard")?;
-            self.grabbed = false;
-        }
         Ok(())
     }
 }
