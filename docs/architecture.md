@@ -11,7 +11,7 @@ application-service layer, and a thin desktop host.
   capture across all active keyboards, FIFO creation, and FIFO writing.
 - `key-b0x-platform-windows` owns Windows-only concerns: Raw Input keyboard
   capture across all active keyboards and Slippi named-pipe transport.
-- `key-b0x-app` owns config loading and migration, profile installation,
+- `key-b0x-app` owns config loading, profile installation,
   snapshot diffing, runtime state transitions, and the worker-thread lifecycle.
 - `apps/desktop/src-tauri` owns the Tauri adapter, commands, event emission,
   and native packaging.
