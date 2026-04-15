@@ -10,6 +10,7 @@ import {
   type BindingMap,
   type DownDiagonalBehavior,
   type HorizontalSocdOverride,
+  type KeyboardTestState,
   type MeleeConfig,
   type NormalizedKey,
   type RuntimeState,
@@ -22,8 +23,9 @@ import {
 } from '../shared/model';
 
 type AppView = 'onboarding' | 'dashboard';
-type OnboardingStep = 'path' | 'profile';
+type OnboardingStep = 'path' | 'profile' | 'keyboard';
 type ToastTone = 'info' | 'success' | 'warning' | 'error';
+type KeyboardTestSource = 'onboarding' | 'settings';
 
 type Toast = {
   id: number;
@@ -50,6 +52,11 @@ type SelectOption<T extends string> = {
 const IDLE_RUNTIME: RuntimeState = {
   status: 'idle',
   startedAt: null,
+  lastError: null
+};
+const IDLE_KEYBOARD_TEST: KeyboardTestState = {
+  status: 'idle',
+  pressedKeys: [],
   lastError: null
 };
 const TOAST_LIFETIME_MS = 3200;
@@ -131,6 +138,11 @@ function App() {
   const [meleeDraft, setMeleeDraft] = useState<MeleeSettingsDraft | null>(null);
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [runtime, setRuntime] = useState<RuntimeState>(IDLE_RUNTIME);
+  const [keyboardTest, setKeyboardTest] = useState<KeyboardTestState>(IDLE_KEYBOARD_TEST);
+  const [keyboardTestOpen, setKeyboardTestOpen] = useState(false);
+  const [keyboardTestSource, setKeyboardTestSource] = useState<KeyboardTestSource | null>(null);
+  const [keyboardTestBusy, setKeyboardTestBusy] = useState(false);
+  const [keyboardTestResumeRuntime, setKeyboardTestResumeRuntime] = useState(false);
   const [slippiPathDraft, setSlippiPathDraft] = useState('');
   const [captureTarget, setCaptureTarget] = useState<BindingId | null>(null);
   const [loading, setLoading] = useState(true);
@@ -145,9 +157,10 @@ function App() {
 
     async function bootstrap() {
       try {
-        const [loadedConfig, loadedRuntimeState] = await Promise.all([
+        const [loadedConfig, loadedRuntimeState, loadedKeyboardTestState] = await Promise.all([
           api.getConfig(),
-          api.getRuntimeState()
+          api.getRuntimeState(),
+          api.getKeyboardTestState()
         ]);
 
         if (!mounted) {
@@ -167,6 +180,7 @@ function App() {
         setMeleeDraft(meleeDraftFromConfig(loadedConfig.melee));
         setSlippiPathDraft(loadedConfig.slippi_user_path);
         setRuntime(loadedRuntimeState);
+        setKeyboardTest(loadedKeyboardTestState);
         setSetup(setupStatus);
         setAppView(initialRoute);
         setOnboardingStep(initialOnboardingStep);
@@ -211,10 +225,14 @@ function App() {
         setAppView('dashboard');
       }
     });
+    const unsubscribeKeyboardTest = api.onKeyboardTestState((nextKeyboardTestState) => {
+      setKeyboardTest(nextKeyboardTestState);
+    });
 
     return () => {
       mounted = false;
       unsubscribe();
+      unsubscribeKeyboardTest();
     };
   }, []);
 
@@ -331,7 +349,7 @@ function App() {
   });
 
   useEffect(() => {
-    if (!settingsOpen || appView !== 'dashboard') {
+    if (!settingsOpen || appView !== 'dashboard' || keyboardTestOpen) {
       return;
     }
 
@@ -349,7 +367,28 @@ function App() {
     return () => {
       window.removeEventListener('keydown', handleDialogKeyDown, true);
     };
-  }, [settingsOpen, appView, configurationReady, runtime.status]);
+  }, [settingsOpen, appView, configurationReady, runtime.status, keyboardTestOpen]);
+
+  useEffect(() => {
+    if (!keyboardTestOpen) {
+      return;
+    }
+
+    function handleDialogKeyDown(event: KeyboardEvent) {
+      if (event.code !== 'Escape') {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      void closeKeyboardTest();
+    }
+
+    window.addEventListener('keydown', handleDialogKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleDialogKeyDown, true);
+    };
+  }, [keyboardTestOpen, keyboardTestBusy, keyboardTestResumeRuntime, runtime.status]);
 
   async function refreshSetup() {
     const nextSetup = await api.checkSetup();
@@ -538,7 +577,75 @@ function App() {
     setCaptureTarget(null);
   }
 
+  async function openKeyboardTest(source: KeyboardTestSource) {
+    if (keyboardTestBusy || runtime.status === 'starting' || runtime.status === 'stopping') {
+      return;
+    }
+
+    setKeyboardTestBusy(true);
+    setKeyboardTestOpen(true);
+    setKeyboardTestSource(source);
+    setKeyboardTestResumeRuntime(false);
+    setKeyboardTest(IDLE_KEYBOARD_TEST);
+
+    const shouldResumeRuntime = source === 'settings' && isRuntimeLive(runtime.status);
+
+    try {
+      if (shouldResumeRuntime) {
+        const nextRuntimeState = await api.stopRuntime();
+        setRuntime(nextRuntimeState);
+        setKeyboardTestResumeRuntime(true);
+      }
+
+      const nextKeyboardTestState = await api.startKeyboardTest();
+      setKeyboardTest(nextKeyboardTestState);
+    } catch (error) {
+      setKeyboardTest({
+        status: 'error',
+        pressedKeys: [],
+        lastError: messageFromError(error)
+      });
+    } finally {
+      setKeyboardTestBusy(false);
+    }
+  }
+
+  async function closeKeyboardTest() {
+    if (keyboardTestBusy) {
+      return;
+    }
+
+    const shouldResumeRuntime = keyboardTestResumeRuntime;
+    setKeyboardTestBusy(true);
+
+    try {
+      await api.stopKeyboardTest();
+    } catch (error) {
+      setScreenError(messageFromError(error));
+    }
+
+    setKeyboardTestOpen(false);
+    setKeyboardTestSource(null);
+    setKeyboardTestResumeRuntime(false);
+    setKeyboardTest(IDLE_KEYBOARD_TEST);
+
+    if (shouldResumeRuntime) {
+      try {
+        const nextRuntimeState = await api.startRuntime();
+        setRuntime(nextRuntimeState);
+      } catch (error) {
+        setScreenError(messageFromError(error));
+      }
+    }
+
+    setKeyboardTestBusy(false);
+  }
+
   async function closeSettings() {
+    if (keyboardTestOpen && keyboardTestSource === 'settings') {
+      await closeKeyboardTest();
+    }
+
     setSettingsOpen(false);
     setCaptureTarget(null);
 
@@ -557,6 +664,10 @@ function App() {
   }
 
   async function enterDashboardFromOnboarding() {
+    if (keyboardTestOpen) {
+      await closeKeyboardTest();
+    }
+
     setCaptureTarget(null);
     setSettingsOpen(false);
     setOnboardingStep('path');
@@ -607,11 +718,26 @@ function App() {
       return;
     }
 
+    if (onboardingStep === 'profile') {
+      setOnboardingStep('keyboard');
+      return;
+    }
+
     await completeOnboarding();
   }
 
-  function goToPreviousStep() {
-    setOnboardingStep('path');
+  async function goToPreviousStep() {
+    if (keyboardTestOpen) {
+      await closeKeyboardTest();
+    }
+
+    setOnboardingStep((currentStep) => {
+      if (currentStep === 'keyboard') {
+        return 'profile';
+      }
+
+      return 'path';
+    });
   }
 
   if (loading || !config || !bindingDraft || !meleeDraft || !setup) {
@@ -664,10 +790,8 @@ function App() {
 
             <div className="wizard-intro">
               <div className="wizard-intro-copy">
-                <div className="section-eyebrow">
-                  {onboardingStep === 'path' ? 'Step 1 of 2' : 'Step 2 of 2'}
-                </div>
-                <h2>{onboardingStep === 'path' ? 'Detected Slippi Path' : 'Load Controller Profile'}</h2>
+                <div className="section-eyebrow">{onboardingStepLabel(onboardingStep)}</div>
+                <h2>{onboardingStepTitle(onboardingStep)}</h2>
               </div>
             </div>
 
@@ -679,7 +803,7 @@ function App() {
                 label="Path"
                 onBrowsePath={handleBrowseSlippiPath}
               />
-            ) : (
+            ) : onboardingStep === 'profile' ? (
               <div className="settings-card settings-card-setup">
                 <div className="settings-card-copy">
                   <h3 className="settings-card-title">Dolphin / Ishiiruka Setup</h3>
@@ -694,16 +818,26 @@ function App() {
                 </ol>
                 <p className="wizard-step-note">When that is done, press Next.</p>
               </div>
+            ) : (
+              <KeyboardTestLauncherCard
+                context="onboarding"
+                busy={keyboardTestBusy}
+                onOpen={() => {
+                  void openKeyboardTest('onboarding');
+                }}
+              />
             )}
 
             <footer className="wizard-footer">
               <div className="wizard-actions">
-                {onboardingStep === 'profile' ? (
+                {onboardingStep !== 'path' ? (
                   <button
                     type="button"
                     className="button button-secondary"
-                    disabled={busyAction === 'complete-onboarding'}
-                    onClick={goToPreviousStep}
+                    disabled={busyAction === 'complete-onboarding' || keyboardTestBusy}
+                    onClick={() => {
+                      void goToPreviousStep();
+                    }}
                   >
                     Back
                   </button>
@@ -715,6 +849,8 @@ function App() {
                     runtimeLocked ||
                     busyAction === 'apply-setup' ||
                     busyAction === 'complete-onboarding' ||
+                    keyboardTestBusy ||
+                    (onboardingStep === 'keyboard' && keyboardTestOpen) ||
                     (onboardingStep === 'path' && slippiPathDraft.trim().length === 0)
                   }
                   onClick={goToNextStep}
@@ -809,8 +945,29 @@ function App() {
                 onSave={handleSaveMelee}
               />
             </div>
+
+            <div className="settings-section">
+              <div className="section-eyebrow">Keyboard</div>
+              <KeyboardTestLauncherCard
+                context="settings"
+                busy={keyboardTestBusy}
+                onOpen={() => {
+                  void openKeyboardTest('settings');
+                }}
+              />
+            </div>
           </section>
         </div>
+      ) : null}
+
+      {keyboardTestOpen ? (
+        <KeyboardTestModal
+          keyboardTest={keyboardTest}
+          busy={keyboardTestBusy}
+          onClose={() => {
+            void closeKeyboardTest();
+          }}
+        />
       ) : null}
 
       <ToastViewport toasts={toasts} runtimeStatus={runtime.status} onDismiss={dismissToast} />
@@ -988,6 +1145,137 @@ function MeleeSettingsSection({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function KeyboardTestLauncherCard({
+  context,
+  busy,
+  onOpen
+}: {
+  context: KeyboardTestSource;
+  busy: boolean;
+  onOpen: () => void;
+}) {
+  const description =
+    context === 'onboarding'
+      ? 'Open the keyboard test and hold the combinations you plan to use. A good keyboard should show every held key at the same time.'
+      : 'Check whether your keyboard can hold the combinations key-b0x needs before you play.';
+
+  const note =
+    context === 'onboarding'
+      ? 'If a held key never appears with the others, that keyboard is likely not suitable.'
+      : 'The runtime pauses while the test is open.';
+
+  return (
+    <div className="settings-card settings-card-setup">
+      <div className="settings-card-copy">
+        <h3 className="settings-card-title">Keyboard Test</h3>
+        <p className="settings-card-description">{description}</p>
+      </div>
+
+      <div className="settings-actions">
+        <div className="settings-inline-note">{note}</div>
+        <div className="toolbar-actions">
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={busy}
+            onClick={onOpen}
+          >
+            Open Keyboard Test
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KeyboardTestModal({
+  keyboardTest,
+  busy,
+  onClose
+}: {
+  keyboardTest: KeyboardTestState;
+  busy: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="settings-shell keyboard-test-shell"
+      role="presentation"
+      onClick={onClose}
+    >
+      <section
+        className="settings-modal keyboard-test-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="keyboard-test-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="settings-modal-header">
+          <div className="settings-modal-copy">
+            <div className="section-eyebrow">Input Check</div>
+            <h2 id="keyboard-test-title" className="settings-modal-title">
+              Keyboard Test
+            </h2>
+            <p className="settings-modal-blurb">
+              Hold the combinations you plan to use. If your keyboard works well, every key you are
+              holding should appear here at the same time.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="settings-close"
+            aria-label="Close keyboard test"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="settings-section">
+          <div className="settings-card settings-card-subtle">
+            <div className="settings-card-copy">
+              <h3 className="settings-card-title">What to Expect</h3>
+              <p className="settings-card-description">
+                Most gaming and mechanical keyboards should show every held key together. Many
+                laptop and non-gaming keyboards will miss some combinations.
+              </p>
+            </div>
+          </div>
+
+          <div className="settings-card">
+            <div className="settings-card-copy">
+              <h3 className="settings-card-title">Detected Keys</h3>
+              <p className="settings-card-description">
+                Press and hold several keys. If one never appears or drops out while held with the
+                others, the keyboard is not a good fit for key-b0x.
+              </p>
+            </div>
+
+            {keyboardTest.status === 'error' ? (
+              <div className="banner banner-error">
+                {keyboardTest.lastError ?? 'Keyboard test failed to start.'}
+              </div>
+            ) : keyboardTest.pressedKeys.length > 0 ? (
+              <div className="keyboard-test-key-grid">
+                {keyboardTest.pressedKeys.map((key) => (
+                  <div key={key} className="keyboard-test-key">
+                    {formatKeyLabel(key)}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="keyboard-test-empty">
+                Hold a few keys now. Every key you are holding should appear here.
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1305,6 +1593,28 @@ function getInitialOnboardingStep(config: AppConfig, setup: SetupStatus): Onboar
   }
 
   return config.onboarding_completed ? 'path' : 'profile';
+}
+
+function onboardingStepLabel(step: OnboardingStep): string {
+  switch (step) {
+    case 'path':
+      return 'Step 1 of 3';
+    case 'profile':
+      return 'Step 2 of 3';
+    case 'keyboard':
+      return 'Step 3 of 3';
+  }
+}
+
+function onboardingStepTitle(step: OnboardingStep): string {
+  switch (step) {
+    case 'path':
+      return 'Detected Slippi Path';
+    case 'profile':
+      return 'Load Controller Profile';
+    case 'keyboard':
+      return 'Keyboard Test';
+  }
 }
 
 function getDashboardNotice({

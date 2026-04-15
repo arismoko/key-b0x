@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppConfig, RuntimeState, SetupStatus } from '../shared/model';
+import type { AppConfig, KeyboardTestState, RuntimeState, SetupStatus } from '../shared/model';
 import App from './App';
 
 const defaultConfig: AppConfig = {
@@ -78,7 +78,20 @@ const runningRuntime: RuntimeState = {
   lastError: null
 };
 
+const idleKeyboardTest: KeyboardTestState = {
+  status: 'idle',
+  pressedKeys: [],
+  lastError: null
+};
+
+const runningKeyboardTest: KeyboardTestState = {
+  status: 'running',
+  pressedKeys: ['KeyA', 'KeyS', 'Space'],
+  lastError: null
+};
+
 let runtimeListener: ((state: RuntimeState) => void) | null = null;
+let keyboardTestListener: ((state: KeyboardTestState) => void) | null = null;
 
 const mockApi = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -88,11 +101,20 @@ const mockApi = vi.hoisted(() => ({
   getRuntimeState: vi.fn(),
   startRuntime: vi.fn(),
   stopRuntime: vi.fn(),
+  getKeyboardTestState: vi.fn(),
+  startKeyboardTest: vi.fn(),
+  stopKeyboardTest: vi.fn(),
   pickSlippiUserPath: vi.fn(),
   onRuntimeState: vi.fn((listener: (state: RuntimeState) => void) => {
     runtimeListener = listener;
     return () => {
       runtimeListener = null;
+    };
+  }),
+  onKeyboardTestState: vi.fn((listener: (state: KeyboardTestState) => void) => {
+    keyboardTestListener = listener;
+    return () => {
+      keyboardTestListener = null;
     };
   })
 }));
@@ -108,6 +130,7 @@ describe('App', () => {
 
   beforeEach(() => {
     runtimeListener = null;
+    keyboardTestListener = null;
     mockApi.getConfig.mockResolvedValue(structuredClone(defaultConfig));
     mockApi.saveConfig.mockImplementation(async (config) => structuredClone(config));
     mockApi.checkSetup.mockResolvedValue(incompleteSetup);
@@ -118,8 +141,12 @@ describe('App', () => {
     mockApi.getRuntimeState.mockResolvedValue(idleRuntime);
     mockApi.startRuntime.mockResolvedValue(runningRuntime);
     mockApi.stopRuntime.mockResolvedValue(idleRuntime);
+    mockApi.getKeyboardTestState.mockResolvedValue(idleKeyboardTest);
+    mockApi.startKeyboardTest.mockResolvedValue(runningKeyboardTest);
+    mockApi.stopKeyboardTest.mockResolvedValue(idleKeyboardTest);
     mockApi.pickSlippiUserPath.mockResolvedValue(null);
     mockApi.onRuntimeState.mockClear();
+    mockApi.onKeyboardTestState.mockClear();
     mockApi.getConfig.mockClear();
     mockApi.saveConfig.mockClear();
     mockApi.checkSetup.mockClear();
@@ -127,6 +154,9 @@ describe('App', () => {
     mockApi.getRuntimeState.mockClear();
     mockApi.startRuntime.mockClear();
     mockApi.stopRuntime.mockClear();
+    mockApi.getKeyboardTestState.mockClear();
+    mockApi.startKeyboardTest.mockClear();
+    mockApi.stopKeyboardTest.mockClear();
     mockApi.pickSlippiUserPath.mockClear();
   });
 
@@ -201,12 +231,28 @@ describe('App', () => {
     expect(screen.getByText('Try restarting Slippi/Dolphin.')).toBeTruthy();
   });
 
-  it('marks onboarding complete after the profile instructions step', async () => {
+  it('advances from the profile instructions to the keyboard test step', async () => {
     mockApi.checkSetup.mockResolvedValue(completeSetup);
 
     render(<App />);
 
     expect(await screen.findByText('Load Controller Profile')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    expect(await screen.findByRole('heading', { name: 'Keyboard Test', level: 2 })).toBeTruthy();
+    expect(mockApi.saveConfig).not.toHaveBeenCalled();
+  });
+
+  it('marks onboarding complete after the keyboard test step', async () => {
+    mockApi.checkSetup.mockResolvedValue(completeSetup);
+
+    render(<App />);
+
+    expect(await screen.findByText('Load Controller Profile')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('heading', { name: 'Keyboard Test', level: 2 })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
@@ -235,5 +281,35 @@ describe('App', () => {
     expect((screen.getByLabelText('Slippi User Path') as HTMLInputElement).value).toBe(
       '/tmp/SlippiOnline'
     );
+  });
+
+  it('opens the keyboard test modal from onboarding and shows detected keys', async () => {
+    mockApi.checkSetup.mockResolvedValue(completeSetup);
+
+    render(<App />);
+
+    expect(await screen.findByText('Load Controller Profile')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByRole('heading', { name: 'Keyboard Test', level: 2 })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Keyboard Test' }));
+
+    await waitFor(() => {
+      expect(mockApi.startKeyboardTest).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByRole('dialog', { name: 'Keyboard Test' })).toBeTruthy();
+
+    await act(async () => {
+      keyboardTestListener?.({
+        status: 'running',
+        pressedKeys: ['KeyA', 'KeyS', 'Space'],
+        lastError: null
+      });
+    });
+
+    expect(screen.getByText('A')).toBeTruthy();
+    expect(screen.getByText('S')).toBeTruthy();
+    expect(screen.getByText('Space')).toBeTruthy();
   });
 });

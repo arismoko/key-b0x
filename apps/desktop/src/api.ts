@@ -4,6 +4,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import type {
   AppConfig,
   InstallProfileResult,
+  KeyboardTestState,
   RuntimeState,
   SetupStatus
 } from '../shared/model';
@@ -42,9 +43,27 @@ export const api = {
   getRuntimeState: (): Promise<RuntimeState> => invokeCommand('get_runtime_state'),
   startRuntime: (): Promise<RuntimeState> => invokeCommand('start_runtime'),
   stopRuntime: (): Promise<RuntimeState> => invokeCommand('stop_runtime'),
+  getKeyboardTestState: (): Promise<KeyboardTestState> => invokeCommand('get_keyboard_test_state'),
+  startKeyboardTest: (): Promise<KeyboardTestState> => invokeCommand('start_keyboard_test'),
+  stopKeyboardTest: (): Promise<KeyboardTestState> => invokeCommand('stop_keyboard_test'),
   onRuntimeState: (listener: (state: RuntimeState) => void) => {
     let disposed = false;
     const unlistenPromise = listen<RuntimeState>('runtime://state', (event) => {
+      listener(event.payload);
+    });
+
+    return () => {
+      disposed = true;
+      void unlistenPromise.then((unlisten) => {
+        if (disposed) {
+          unlisten();
+        }
+      });
+    };
+  },
+  onKeyboardTestState: (listener: (state: KeyboardTestState) => void) => {
+    let disposed = false;
+    const unlistenPromise = listen<KeyboardTestState>('keyboard-test://state', (event) => {
       listener(event.payload);
     });
 

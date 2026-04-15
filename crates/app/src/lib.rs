@@ -1,5 +1,7 @@
 mod bindings;
 mod config;
+mod keyboard_test;
+mod keyboard_test_controller;
 mod platform;
 mod profile;
 mod runtime_controller;
@@ -10,10 +12,12 @@ mod transport;
 
 use anyhow::Result;
 use key_b0x_platform::KeyboardBackend;
+use keyboard_test::KeyboardTestListener;
 use std::path::PathBuf;
 
 pub use config::{AppConfig, CONFIG_VERSION, default_config_path, render_default_config};
 pub use key_b0x_platform::KeyboardInfo;
+pub use keyboard_test::{KeyboardTestState, KeyboardTestStatus};
 pub use profile::{InstallProfileResult, PIPE_TARGET_LABEL, PROFILE_FILE_NAME};
 pub use runtime_controller::{RuntimeWorkerContext, RuntimeWorkerSpawner};
 pub use setup::SetupStatus;
@@ -34,17 +38,40 @@ impl AppPaths {
 
 pub struct AppService {
     paths: AppPaths,
+    keyboard_test_controller: keyboard_test_controller::KeyboardTestController,
     runtime_controller: runtime_controller::RuntimeController,
 }
 
 impl AppService {
     pub fn new(listener: Option<StateListener>) -> Result<Self> {
+        Self::new_with_listeners(listener, None)
+    }
+
+    pub fn new_with_listeners(
+        listener: Option<StateListener>,
+        keyboard_test_listener: Option<KeyboardTestListener>,
+    ) -> Result<Self> {
         let paths = AppPaths::from_default_location()?;
-        Ok(Self::with_paths(paths, listener))
+        Ok(Self::with_paths_and_listeners(
+            paths,
+            listener,
+            keyboard_test_listener,
+        ))
     }
 
     pub fn with_paths(paths: AppPaths, listener: Option<StateListener>) -> Self {
+        Self::with_paths_and_listeners(paths, listener, None)
+    }
+
+    pub fn with_paths_and_listeners(
+        paths: AppPaths,
+        listener: Option<StateListener>,
+        keyboard_test_listener: Option<KeyboardTestListener>,
+    ) -> Self {
         Self {
+            keyboard_test_controller: keyboard_test_controller::KeyboardTestController::new(
+                keyboard_test_listener,
+            ),
             runtime_controller: runtime_controller::RuntimeController::new(
                 paths.config_path.clone(),
                 listener,
@@ -59,6 +86,7 @@ impl AppService {
         worker_spawner: RuntimeWorkerSpawner,
     ) -> Self {
         Self {
+            keyboard_test_controller: keyboard_test_controller::KeyboardTestController::new(None),
             runtime_controller: runtime_controller::RuntimeController::with_spawner(
                 paths.config_path.clone(),
                 listener,
@@ -111,7 +139,20 @@ impl AppService {
         self.runtime_controller.stop()
     }
 
+    pub fn get_keyboard_test_state(&mut self) -> KeyboardTestState {
+        self.keyboard_test_controller.get_state()
+    }
+
+    pub fn start_keyboard_test(&mut self) -> Result<KeyboardTestState> {
+        self.keyboard_test_controller.start()
+    }
+
+    pub fn stop_keyboard_test(&mut self) -> KeyboardTestState {
+        self.keyboard_test_controller.stop()
+    }
+
     pub fn shutdown(&mut self) -> RuntimeState {
+        let _ = self.keyboard_test_controller.shutdown();
         self.runtime_controller.shutdown()
     }
 

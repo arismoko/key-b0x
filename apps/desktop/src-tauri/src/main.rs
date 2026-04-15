@@ -1,7 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use key_b0x_app::{
-    AppConfig, AppService, InstallProfileResult, RuntimeState, SetupStatus, StateListener,
+    AppConfig, AppService, InstallProfileResult, KeyboardTestState, RuntimeState, SetupStatus,
+    StateListener,
 };
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -55,6 +56,21 @@ fn stop_runtime(state: State<'_, AppState>) -> RuntimeState {
 }
 
 #[tauri::command]
+fn get_keyboard_test_state(state: State<'_, AppState>) -> KeyboardTestState {
+    with_service_state(&state, |service| service.get_keyboard_test_state())
+}
+
+#[tauri::command]
+fn start_keyboard_test(state: State<'_, AppState>) -> Result<KeyboardTestState, String> {
+    with_service(&state, |service| service.start_keyboard_test())
+}
+
+#[tauri::command]
+fn stop_keyboard_test(state: State<'_, AppState>) -> KeyboardTestState {
+    with_service_state(&state, |service| service.stop_keyboard_test())
+}
+
+#[tauri::command]
 fn list_keyboards(state: State<'_, AppState>) -> Result<Vec<key_b0x_app::KeyboardInfo>, String> {
     with_service(&state, |service| service.list_keyboards())
 }
@@ -67,9 +83,16 @@ fn main() {
             let listener: StateListener = Arc::new(move |runtime_state| {
                 let _ = app_handle.emit("runtime://state", runtime_state);
             });
-            let service = AppService::new(Some(listener)).map_err(|error| {
-                Box::new(std::io::Error::other(error.to_string())) as Box<dyn std::error::Error>
-            })?;
+            let keyboard_test_handle = app.handle().clone();
+            let keyboard_test_listener = Arc::new(move |keyboard_test_state| {
+                let _ = keyboard_test_handle.emit("keyboard-test://state", keyboard_test_state);
+            });
+            let service =
+                AppService::new_with_listeners(Some(listener), Some(keyboard_test_listener))
+                    .map_err(|error| {
+                        Box::new(std::io::Error::other(error.to_string()))
+                            as Box<dyn std::error::Error>
+                    })?;
             app.manage(AppState {
                 service: Mutex::new(service),
             });
@@ -83,6 +106,9 @@ fn main() {
             get_runtime_state,
             start_runtime,
             stop_runtime,
+            get_keyboard_test_state,
+            start_keyboard_test,
+            stop_keyboard_test,
             list_keyboards
         ])
         .build(tauri::generate_context!())

@@ -54,7 +54,6 @@ Linux AppImage releases target modern Linux distributions rather than oldest-pos
   `%APPDATA%\Slippi Launcher\netplay\User` on Windows
 - The config format is now `v2` and stores normalized physical key codes such
   as `BracketRight`, `Digit3`, `KeyV`, and `ArrowUp`
-- Existing `v1` configs using Linux `KEY_*` names are migrated to `v2` on load
 - Linux creates `~/.config/SlippiOnline/Pipes/slippibot1` when the profile is
   installed
 - The installed profile lives at

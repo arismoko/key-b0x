@@ -196,6 +196,14 @@ export interface RuntimeState {
   lastError?: string | null;
 }
 
+export type KeyboardTestStatus = 'idle' | 'running' | 'error';
+
+export interface KeyboardTestState {
+  status: KeyboardTestStatus;
+  pressedKeys: NormalizedKey[];
+  lastError?: string | null;
+}
+
 export interface InstallProfileResult {
   profilePath: string;
   pipesPath?: string | null;
