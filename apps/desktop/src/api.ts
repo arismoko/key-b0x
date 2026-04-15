@@ -6,7 +6,9 @@ import type {
   InstallProfileResult,
   KeyboardTestState,
   RuntimeState,
-  SetupStatus
+  SetupStatus,
+  UpdateInfo,
+  UpdateState
 } from '../shared/model';
 
 async function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -46,6 +48,10 @@ export const api = {
   getKeyboardTestState: (): Promise<KeyboardTestState> => invokeCommand('get_keyboard_test_state'),
   startKeyboardTest: (): Promise<KeyboardTestState> => invokeCommand('start_keyboard_test'),
   stopKeyboardTest: (): Promise<KeyboardTestState> => invokeCommand('stop_keyboard_test'),
+  getAppVersion: (): Promise<string> => invokeCommand('get_app_version'),
+  checkForUpdate: (): Promise<UpdateInfo | null> => invokeCommand('check_for_update'),
+  downloadUpdate: (): Promise<void> => invokeCommand('download_update'),
+  installUpdate: (): Promise<void> => invokeCommand('install_update'),
   onRuntimeState: (listener: (state: RuntimeState) => void) => {
     let disposed = false;
     const unlistenPromise = listen<RuntimeState>('runtime://state', (event) => {
@@ -64,6 +70,21 @@ export const api = {
   onKeyboardTestState: (listener: (state: KeyboardTestState) => void) => {
     let disposed = false;
     const unlistenPromise = listen<KeyboardTestState>('keyboard-test://state', (event) => {
+      listener(event.payload);
+    });
+
+    return () => {
+      disposed = true;
+      void unlistenPromise.then((unlisten) => {
+        if (disposed) {
+          unlisten();
+        }
+      });
+    };
+  },
+  onUpdateState: (listener: (state: UpdateState) => void) => {
+    let disposed = false;
+    const unlistenPromise = listen<UpdateState>('updater://state', (event) => {
       listener(event.payload);
     });
 

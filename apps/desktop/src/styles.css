@@ -810,6 +810,49 @@ select {
   line-height: 1.45;
 }
 
+.settings-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.settings-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(232, 237, 242, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.settings-meta-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  font-weight: 700;
+}
+
+.settings-meta-value {
+  color: var(--ink);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.settings-card-embedded {
+  margin-top: -2px;
+}
+
+.banner-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
 .settings-choice-grid {
   display: grid;
   gap: 10px;
@@ -998,6 +1041,7 @@ select {
   .settings-choice-grid-compact,
   .settings-choice-grid-wide,
   .settings-axis-grid,
+  .settings-meta-grid,
   .settings-path-row {
     grid-template-columns: 1fr;
   }

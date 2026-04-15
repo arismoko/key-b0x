@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppConfig, KeyboardTestState, RuntimeState, SetupStatus } from '../shared/model';
+import type {
+  AppConfig,
+  KeyboardTestState,
+  RuntimeState,
+  SetupStatus,
+  UpdateState
+} from '../shared/model';
 import App from './App';
 
 const defaultConfig: AppConfig = {
@@ -84,6 +90,18 @@ const idleKeyboardTest: KeyboardTestState = {
   lastError: null
 };
 
+const idleUpdateState: UpdateState = {
+  status: 'idle',
+  currentVersion: '0.1.0',
+  latestVersion: null,
+  notes: null,
+  publishedAt: null,
+  target: null,
+  downloadedBytes: null,
+  contentLength: null,
+  lastError: null
+};
+
 const runningKeyboardTest: KeyboardTestState = {
   status: 'running',
   pressedKeys: ['KeyA', 'KeyS', 'Space'],
@@ -92,6 +110,7 @@ const runningKeyboardTest: KeyboardTestState = {
 
 let runtimeListener: ((state: RuntimeState) => void) | null = null;
 let keyboardTestListener: ((state: KeyboardTestState) => void) | null = null;
+let updateStateListener: ((state: UpdateState) => void) | null = null;
 
 const mockApi = vi.hoisted(() => ({
   getConfig: vi.fn(),
@@ -104,6 +123,10 @@ const mockApi = vi.hoisted(() => ({
   getKeyboardTestState: vi.fn(),
   startKeyboardTest: vi.fn(),
   stopKeyboardTest: vi.fn(),
+  getAppVersion: vi.fn(),
+  checkForUpdate: vi.fn(),
+  downloadUpdate: vi.fn(),
+  installUpdate: vi.fn(),
   pickSlippiUserPath: vi.fn(),
   onRuntimeState: vi.fn((listener: (state: RuntimeState) => void) => {
     runtimeListener = listener;
@@ -115,6 +138,12 @@ const mockApi = vi.hoisted(() => ({
     keyboardTestListener = listener;
     return () => {
       keyboardTestListener = null;
+    };
+  }),
+  onUpdateState: vi.fn((listener: (state: UpdateState) => void) => {
+    updateStateListener = listener;
+    return () => {
+      updateStateListener = null;
     };
   })
 }));
@@ -131,6 +160,7 @@ describe('App', () => {
   beforeEach(() => {
     runtimeListener = null;
     keyboardTestListener = null;
+    updateStateListener = null;
     mockApi.getConfig.mockResolvedValue(structuredClone(defaultConfig));
     mockApi.saveConfig.mockImplementation(async (config) => structuredClone(config));
     mockApi.checkSetup.mockResolvedValue(incompleteSetup);
@@ -144,9 +174,14 @@ describe('App', () => {
     mockApi.getKeyboardTestState.mockResolvedValue(idleKeyboardTest);
     mockApi.startKeyboardTest.mockResolvedValue(runningKeyboardTest);
     mockApi.stopKeyboardTest.mockResolvedValue(idleKeyboardTest);
+    mockApi.getAppVersion.mockResolvedValue('0.1.0');
+    mockApi.checkForUpdate.mockResolvedValue(null);
+    mockApi.downloadUpdate.mockResolvedValue(undefined);
+    mockApi.installUpdate.mockResolvedValue(undefined);
     mockApi.pickSlippiUserPath.mockResolvedValue(null);
     mockApi.onRuntimeState.mockClear();
     mockApi.onKeyboardTestState.mockClear();
+    mockApi.onUpdateState.mockClear();
     mockApi.getConfig.mockClear();
     mockApi.saveConfig.mockClear();
     mockApi.checkSetup.mockClear();
@@ -157,6 +192,10 @@ describe('App', () => {
     mockApi.getKeyboardTestState.mockClear();
     mockApi.startKeyboardTest.mockClear();
     mockApi.stopKeyboardTest.mockClear();
+    mockApi.getAppVersion.mockClear();
+    mockApi.checkForUpdate.mockClear();
+    mockApi.downloadUpdate.mockClear();
+    mockApi.installUpdate.mockClear();
     mockApi.pickSlippiUserPath.mockClear();
   });
 
@@ -229,6 +268,115 @@ describe('App', () => {
 
     expect(screen.getByText('Waiting for Slippi')).toBeTruthy();
     expect(screen.getByText('Try restarting Slippi/Dolphin.')).toBeTruthy();
+  });
+
+  it('shows a dashboard update banner when an update is available', async () => {
+    mockApi.getConfig.mockResolvedValue({
+      ...structuredClone(defaultConfig),
+      onboarding_completed: true
+    });
+    mockApi.checkSetup.mockResolvedValue(completeSetup);
+
+    render(<App />);
+
+    await screen.findByRole('button', { name: 'Open settings' });
+
+    await act(async () => {
+      updateStateListener?.({
+        ...idleUpdateState,
+        status: 'available',
+        latestVersion: '0.2.0',
+        notes: 'Bug fixes.',
+        target: 'linux-x86_64'
+      });
+    });
+
+    expect(screen.getByText('Update 0.2.0 is available.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Download Update' })).toBeTruthy();
+  });
+
+  it('shows download progress in the settings updates section', async () => {
+    mockApi.getConfig.mockResolvedValue({
+      ...structuredClone(defaultConfig),
+      onboarding_completed: true
+    });
+    mockApi.checkSetup.mockResolvedValue(completeSetup);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }));
+    await screen.findByRole('heading', { name: 'Settings', level: 2 });
+
+    await act(async () => {
+      updateStateListener?.({
+        ...idleUpdateState,
+        status: 'downloading',
+        latestVersion: '0.2.0',
+        target: 'linux-x86_64',
+        downloadedBytes: 512,
+        contentLength: 1024
+      });
+    });
+
+    expect(screen.getByText('Downloading')).toBeTruthy();
+    expect(screen.getByText('50% (512 B / 1.0 KB)')).toBeTruthy();
+  });
+
+  it('shows the ready-to-install banner once an update is downloaded', async () => {
+    mockApi.getConfig.mockResolvedValue({
+      ...structuredClone(defaultConfig),
+      onboarding_completed: true
+    });
+    mockApi.checkSetup.mockResolvedValue(completeSetup);
+
+    render(<App />);
+
+    await screen.findByRole('button', { name: 'Open settings' });
+
+    await act(async () => {
+      updateStateListener?.({
+        ...idleUpdateState,
+        status: 'downloaded',
+        latestVersion: '0.2.0',
+        target: 'linux-x86_64',
+        downloadedBytes: 1024,
+        contentLength: 1024
+      });
+    });
+
+    expect(screen.getByText('Update 0.2.0 is ready to apply.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Restart to Update' })).toBeTruthy();
+  });
+
+  it('shows updater errors in the settings updates section', async () => {
+    mockApi.getConfig.mockResolvedValue({
+      ...structuredClone(defaultConfig),
+      onboarding_completed: true
+    });
+    mockApi.checkSetup.mockResolvedValue(completeSetup);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }));
+    await screen.findByRole('heading', { name: 'Settings', level: 2 });
+
+    await act(async () => {
+      updateStateListener?.({
+        ...idleUpdateState,
+        status: 'error',
+        latestVersion: '0.2.0',
+        target: 'linux-x86_64',
+        lastError: 'Move key-b0x.AppImage to a writable location such as ~/Applications/key-b0x.AppImage and try again.'
+      });
+    });
+
+    expect(
+      screen.getByText(
+        'Move key-b0x.AppImage to a writable location such as ~/Applications/key-b0x.AppImage and try again.'
+      )
+    ).toBeTruthy();
+    const settingsDialog = screen.getByRole('dialog', { name: 'Settings' });
+    expect(within(settingsDialog).getByRole('button', { name: 'Download Update' })).toBeTruthy();
   });
 
   it('advances from the profile instructions to the keyboard test step', async () => {

@@ -23,10 +23,12 @@ jobs:
             platform: linux
             artifact_name: bundle-smoke-linux
             source_glob: target/release/bundle/appimage/*.AppImage
+            sig_glob: target/release/bundle/appimage/*.AppImage.sig
           - os: windows-latest
             platform: windows
             artifact_name: bundle-smoke-windows
             source_glob: target/release/bundle/nsis/*.exe
+            sig_glob: target/release/bundle/nsis/*.exe.sig
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -76,6 +78,9 @@ jobs:
 
       - name: Build Tauri bundle
         working-directory: apps/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run build
 
       - name: Stage release-shaped artifact
@@ -85,28 +90,38 @@ jobs:
           VERSION: ${{ steps.version.outputs.value }}
           PLATFORM: ${{ matrix.platform }}
           SOURCE_GLOB: ${{ matrix.source_glob }}
+          SIG_GLOB: ${{ matrix.sig_glob }}
         run: |
           shopt -s nullglob
           files=($SOURCE_GLOB)
+          signatures=($SIG_GLOB)
           if [[ "${#files[@]}" -ne 1 ]]; then
             echo "expected exactly one bundle artifact, found ${#files[@]}" >&2
             printf '%s\n' "${files[@]}"
             exit 1
           fi
 
+          if [[ "${#signatures[@]}" -ne 1 ]]; then
+            echo "expected exactly one updater signature, found ${#signatures[@]}" >&2
+            printf '%s\n' "${signatures[@]}"
+            exit 1
+          fi
+
           mkdir -p release-assets
           if [[ "$PLATFORM" == "linux" ]]; then
             asset_name="key-b0x_${VERSION}_linux_x86_64.AppImage"
+            sig_name="key-b0x_${VERSION}_linux_x86_64.AppImage.sig"
           else
             asset_name="key-b0x_${VERSION}_windows_x64-setup.exe"
+            sig_name="key-b0x_${VERSION}_windows_x64-setup.exe.sig"
           fi
 
           cp "${files[0]}" "release-assets/$asset_name"
-          echo "asset_path=release-assets/$asset_name" >> "$GITHUB_OUTPUT"
+          cp "${signatures[0]}" "release-assets/$sig_name"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ steps.stage.outputs.asset_path }}
+          path: release-assets/*
           if-no-files-found: error

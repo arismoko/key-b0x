@@ -53,6 +53,28 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.meta.outputs.checkout_ref }}
+
+      - name: Guard package version
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          package_version="$(python - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.loads(Path('apps/desktop/package.json').read_text())['version'])
+          PY
+          )"
+
+          if [[ "$package_version" != "$EXPECTED_VERSION" ]]; then
+            echo "tag version $EXPECTED_VERSION does not match apps/desktop/package.json version $package_version" >&2
+            exit 1
+          fi
+
   bundle:
     needs: meta
     strategy:
@@ -63,10 +85,12 @@ jobs:
             platform: linux
             artifact_name: release-linux
             source_glob: target/release/bundle/appimage/*.AppImage
+            sig_glob: target/release/bundle/appimage/*.AppImage.sig
           - os: windows-latest
             platform: windows
             artifact_name: release-windows
             source_glob: target/release/bundle/nsis/*.exe
+            sig_glob: target/release/bundle/nsis/*.exe.sig
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -112,6 +136,9 @@ jobs:
 
       - name: Build Tauri bundle
         working-directory: apps/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npm run build
 
       - name: Stage release asset
@@ -121,30 +148,43 @@ jobs:
           VERSION: ${{ needs.meta.outputs.version }}
           PLATFORM: ${{ matrix.platform }}
           SOURCE_GLOB: ${{ matrix.source_glob }}
+          SIG_GLOB: ${{ matrix.sig_glob }}
         run: |
           shopt -s nullglob
-          files=($SOURCE_GLOB)
-          if [[ "${#files[@]}" -ne 1 ]]; then
-            echo "expected exactly one bundle artifact, found ${#files[@]}" >&2
-            printf '%s\n' "${files[@]}"
+          bundles=($SOURCE_GLOB)
+          signatures=($SIG_GLOB)
+
+          if [[ "${#bundles[@]}" -ne 1 ]]; then
+            echo "expected exactly one bundle artifact, found ${#bundles[@]}" >&2
+            printf '%s\n' "${bundles[@]}"
+            exit 1
+          fi
+
+          if [[ "${#signatures[@]}" -ne 1 ]]; then
+            echo "expected exactly one updater signature, found ${#signatures[@]}" >&2
+            printf '%s\n' "${signatures[@]}"
             exit 1
           fi
 
           mkdir -p release-assets
           if [[ "$PLATFORM" == "linux" ]]; then
             asset_name="key-b0x_${VERSION}_linux_x86_64.AppImage"
+            sig_name="key-b0x_${VERSION}_linux_x86_64.AppImage.sig"
           else
             asset_name="key-b0x_${VERSION}_windows_x64-setup.exe"
+            sig_name="key-b0x_${VERSION}_windows_x64-setup.exe.sig"
           fi
 
-          cp "${files[0]}" "release-assets/$asset_name"
-          echo "asset_path=release-assets/$asset_name" >> "$GITHUB_OUTPUT"
+          cp "${bundles[0]}" "release-assets/$asset_name"
+          cp "${signatures[0]}" "release-assets/$sig_name"
+          echo "asset_name=$asset_name" >> "$GITHUB_OUTPUT"
+          echo "sig_name=$sig_name" >> "$GITHUB_OUTPUT"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ steps.stage.outputs.asset_path }}
+          path: release-assets/*
           if-no-files-found: error
 
   publish:
@@ -155,6 +195,11 @@ jobs:
     environment: release
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.meta.outputs.checkout_ref }}
+
       - name: Download staged release artifacts
         uses: actions/download-artifact@v4
         with:
@@ -162,11 +207,33 @@ jobs:
           merge-multiple: true
           path: release-assets
 
+      - name: Generate latest.json
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+          TAG_NAME: ${{ needs.meta.outputs.tag_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          linux_asset="key-b0x_${VERSION}_linux_x86_64.AppImage"
+          linux_sig="key-b0x_${VERSION}_linux_x86_64.AppImage.sig"
+          windows_asset="key-b0x_${VERSION}_windows_x64-setup.exe"
+          windows_sig="key-b0x_${VERSION}_windows_x64-setup.exe.sig"
+          notes="$(git tag -l --format='%(contents)' "$TAG_NAME" | sed '/^$/d' || true)"
+
+          python scripts/generate_latest_json.py \
+            --version "$VERSION" \
+            --notes "$notes" \
+            --linux-url "https://github.com/${REPOSITORY}/releases/download/${TAG_NAME}/${linux_asset}" \
+            --linux-sig-file "release-assets/${linux_sig}" \
+            --windows-url "https://github.com/${REPOSITORY}/releases/download/${TAG_NAME}/${windows_asset}" \
+            --windows-sig-file "release-assets/${windows_sig}" \
+            --output "release-assets/latest.json"
+
       - name: Generate checksums
         shell: bash
         run: |
           cd release-assets
-          sha256sum key-b0x_* > SHA256SUMS.txt
+          sha256sum key-b0x_* latest.json > SHA256SUMS.txt
 
       - name: Create draft GitHub release
         uses: softprops/action-gh-release@v2
@@ -178,5 +245,8 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             release-assets/key-b0x_*.AppImage
+            release-assets/key-b0x_*.AppImage.sig
             release-assets/key-b0x_*.exe
+            release-assets/key-b0x_*.exe.sig
+            release-assets/latest.json
             release-assets/SHA256SUMS.txt

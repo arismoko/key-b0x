@@ -35,8 +35,7 @@ release runbook lives in [docs/releasing.md](docs/releasing.md).
 
 - Slippi user data defaults to `~/.config/SlippiOnline` on Linux and
   `%APPDATA%\Slippi Launcher\netplay\User` on Windows
-- Linux creates `~/.config/SlippiOnline/Pipes/slippibot1` when the profile is
-  installed
+- Linux creates `~/.config/SlippiOnline/Pipes/slippibot1` when the profile is installed
 - The installed profile lives at
   `~/.config/SlippiOnline/Config/Profiles/GCPad/key-b0x.ini` on Linux and
   `%APPDATA%\Slippi Launcher\netplay\User\Config\Profiles\GCPad\key-b0x.ini`
@@ -44,3 +43,5 @@ release runbook lives in [docs/releasing.md](docs/releasing.md).
 - Both Linux and Windows capture from all active keyboards in the current
   session
 - You still need to load the `key-b0x` profile in Slippi's controller UI
+- For Linux in-app updates, keep `key-b0x.AppImage` in a stable writable
+  location such as `~/Applications/key-b0x.AppImage`

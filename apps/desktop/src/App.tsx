@@ -16,6 +16,7 @@ import {
   type RuntimeState,
   type SocdMode,
   type SetupStatus,
+  type UpdateState,
   findDuplicateBindings,
   formatBindingLabel,
   formatKeyLabel,
@@ -57,6 +58,17 @@ const IDLE_RUNTIME: RuntimeState = {
 const IDLE_KEYBOARD_TEST: KeyboardTestState = {
   status: 'idle',
   pressedKeys: [],
+  lastError: null
+};
+const IDLE_UPDATE_STATE: UpdateState = {
+  status: 'idle',
+  currentVersion: '',
+  latestVersion: null,
+  notes: null,
+  publishedAt: null,
+  target: null,
+  downloadedBytes: null,
+  contentLength: null,
   lastError: null
 };
 const TOAST_LIFETIME_MS = 3200;
@@ -139,6 +151,7 @@ function App() {
   const [setup, setSetup] = useState<SetupStatus | null>(null);
   const [runtime, setRuntime] = useState<RuntimeState>(IDLE_RUNTIME);
   const [keyboardTest, setKeyboardTest] = useState<KeyboardTestState>(IDLE_KEYBOARD_TEST);
+  const [updateState, setUpdateState] = useState<UpdateState>(IDLE_UPDATE_STATE);
   const [keyboardTestOpen, setKeyboardTestOpen] = useState(false);
   const [keyboardTestSource, setKeyboardTestSource] = useState<KeyboardTestSource | null>(null);
   const [keyboardTestBusy, setKeyboardTestBusy] = useState(false);
@@ -151,16 +164,23 @@ function App() {
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const nextToastId = useRef(0);
   const toastTimeouts = useRef(new Map<number, number>());
+  const hasAutoCheckedForUpdates = useRef(false);
 
   useEffect(() => {
     let mounted = true;
 
     async function bootstrap() {
       try {
-        const [loadedConfig, loadedRuntimeState, loadedKeyboardTestState] = await Promise.all([
+        const [
+          loadedConfig,
+          loadedRuntimeState,
+          loadedKeyboardTestState,
+          currentAppVersion
+        ] = await Promise.all([
           api.getConfig(),
           api.getRuntimeState(),
-          api.getKeyboardTestState()
+          api.getKeyboardTestState(),
+          api.getAppVersion()
         ]);
 
         if (!mounted) {
@@ -181,6 +201,10 @@ function App() {
         setSlippiPathDraft(loadedConfig.slippi_user_path);
         setRuntime(loadedRuntimeState);
         setKeyboardTest(loadedKeyboardTestState);
+        setUpdateState({
+          ...IDLE_UPDATE_STATE,
+          currentVersion: currentAppVersion
+        });
         setSetup(setupStatus);
         setAppView(initialRoute);
         setOnboardingStep(initialOnboardingStep);
@@ -228,13 +252,26 @@ function App() {
     const unsubscribeKeyboardTest = api.onKeyboardTestState((nextKeyboardTestState) => {
       setKeyboardTest(nextKeyboardTestState);
     });
+    const unsubscribeUpdater = api.onUpdateState((nextUpdateState) => {
+      setUpdateState(nextUpdateState);
+    });
 
     return () => {
       mounted = false;
       unsubscribe();
       unsubscribeKeyboardTest();
+      unsubscribeUpdater();
     };
   }, []);
+
+  useEffect(() => {
+    if (loading || hasAutoCheckedForUpdates.current || updateState.currentVersion.length === 0) {
+      return;
+    }
+
+    hasAutoCheckedForUpdates.current = true;
+    void handleCheckForUpdates(true);
+  }, [loading, updateState.currentVersion]);
 
   useEffect(() => {
     return () => {
@@ -347,6 +384,12 @@ function App() {
     setupComplete,
     duplicateGroups
   });
+  const updateAvailable =
+    updateState.status === 'available' ||
+    (updateState.status === 'error' && Boolean(updateState.latestVersion) && !updateState.downloadedBytes);
+  const updateReady =
+    updateState.status === 'downloaded' ||
+    (updateState.status === 'error' && Boolean(updateState.downloadedBytes));
 
   useEffect(() => {
     if (!settingsOpen || appView !== 'dashboard' || keyboardTestOpen) {
@@ -569,6 +612,57 @@ function App() {
       }
     } catch (error) {
       setScreenError(messageFromError(error));
+    }
+  }
+
+  async function handleCheckForUpdates(silent = false) {
+    setBusyAction('check-for-update');
+
+    try {
+      await api.checkForUpdate();
+    } catch (error) {
+      if (!silent) {
+        pushToast('Update check failed.', 'error');
+      }
+    } finally {
+      setBusyAction((currentAction) =>
+        currentAction === 'check-for-update' ? null : currentAction
+      );
+    }
+  }
+
+  async function handleDownloadUpdate() {
+    setBusyAction('download-update');
+
+    try {
+      await api.downloadUpdate();
+      pushToast('Update downloaded.', 'success');
+    } catch (error) {
+      void error;
+    } finally {
+      setBusyAction((currentAction) =>
+        currentAction === 'download-update' ? null : currentAction
+      );
+    }
+  }
+
+  async function handleInstallUpdate() {
+    const installingOnWindows = isWindows();
+
+    if (installingOnWindows) {
+      pushToast('App will close briefly while the installer runs.', 'warning');
+    }
+
+    setBusyAction('install-update');
+
+    try {
+      await api.installUpdate();
+    } catch (error) {
+      void error;
+    } finally {
+      setBusyAction((currentAction) =>
+        currentAction === 'install-update' ? null : currentAction
+      );
     }
   }
 
@@ -863,6 +957,18 @@ function App() {
         ) : (
           <section className="dashboard-shell">
             {screenError ? <div className="banner banner-error">{screenError}</div> : null}
+            {updateAvailable || updateReady ? (
+              <UpdateBanner
+                updateState={updateState}
+                busyAction={busyAction}
+                onDownload={() => {
+                  void handleDownloadUpdate();
+                }}
+                onInstall={() => {
+                  void handleInstallUpdate();
+                }}
+              />
+            ) : null}
             {dashboardNotice ? <div className={`banner banner-${dashboardNotice.tone}`}>{dashboardNotice.message}</div> : null}
 
             <BindingsSection
@@ -953,6 +1059,23 @@ function App() {
                 busy={keyboardTestBusy}
                 onOpen={() => {
                   void openKeyboardTest('settings');
+                }}
+              />
+            </div>
+
+            <div className="settings-section">
+              <div className="section-eyebrow">Updates</div>
+              <UpdatesSection
+                updateState={updateState}
+                busyAction={busyAction}
+                onCheck={() => {
+                  void handleCheckForUpdates();
+                }}
+                onDownload={() => {
+                  void handleDownloadUpdate();
+                }}
+                onInstall={() => {
+                  void handleInstallUpdate();
                 }}
               />
             </div>
@@ -1145,6 +1268,144 @@ function MeleeSettingsSection({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function UpdatesSection({
+  updateState,
+  busyAction,
+  onCheck,
+  onDownload,
+  onInstall
+}: {
+  updateState: UpdateState;
+  busyAction: string | null;
+  onCheck: () => void;
+  onDownload: () => void;
+  onInstall: () => void;
+}) {
+  const checking = busyAction === 'check-for-update' || updateState.status === 'checking';
+  const downloading = busyAction === 'download-update' || updateState.status === 'downloading';
+  const installing = busyAction === 'install-update' || updateState.status === 'installing';
+  const available = canDownloadUpdate(updateState);
+  const ready = canInstallUpdate(updateState);
+  const progressText = formatUpdateProgress(updateState);
+  const installLabel = isWindows() ? 'Install Update' : 'Restart to Update';
+
+  return (
+    <div className="settings-card settings-card-setup">
+      <div className="settings-card-copy">
+        <h3 className="settings-card-title">Updates</h3>
+        <p className="settings-card-description">
+          Check for new releases without leaving the app, then choose when to download and apply
+          them.
+        </p>
+      </div>
+
+      <div className="settings-meta-grid">
+        <div className="settings-meta-item">
+          <span className="settings-meta-label">Current Version</span>
+          <strong className="settings-meta-value">{updateState.currentVersion || 'Unknown'}</strong>
+        </div>
+        <div className="settings-meta-item">
+          <span className="settings-meta-label">Latest Version</span>
+          <strong className="settings-meta-value">{updateState.latestVersion ?? 'Not checked yet'}</strong>
+        </div>
+        <div className="settings-meta-item">
+          <span className="settings-meta-label">Status</span>
+          <strong className="settings-meta-value">{updateStatusLabel(updateState.status)}</strong>
+        </div>
+        {progressText ? (
+          <div className="settings-meta-item">
+            <span className="settings-meta-label">Progress</span>
+            <strong className="settings-meta-value">{progressText}</strong>
+          </div>
+        ) : null}
+      </div>
+
+      {updateState.notes ? (
+        <div className="settings-card settings-card-subtle settings-card-embedded">
+          <div className="settings-card-copy">
+            <h4 className="settings-card-title">Release Notes</h4>
+            <p className="settings-card-description">{updateState.notes}</p>
+          </div>
+        </div>
+      ) : null}
+
+      {updateState.lastError ? <div className="banner banner-error">{updateState.lastError}</div> : null}
+
+      <div className="settings-actions settings-actions-elevated">
+        <div className="settings-inline-note">
+          {isWindows()
+            ? 'Installing an update closes key-b0x briefly while the installer runs.'
+            : 'For in-app updates, keep key-b0x.AppImage in a writable location such as ~/Applications/key-b0x.AppImage.'}
+        </div>
+        <div className="toolbar-actions">
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={checking || downloading || installing || ready}
+            onClick={onCheck}
+          >
+            Check for Updates
+          </button>
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={!available || checking || downloading || installing}
+            onClick={onDownload}
+          >
+            {downloading ? 'Downloading…' : 'Download Update'}
+          </button>
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={!ready || checking || downloading || installing}
+            onClick={onInstall}
+          >
+            {installing ? 'Installing…' : installLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UpdateBanner({
+  updateState,
+  busyAction,
+  onDownload,
+  onInstall
+}: {
+  updateState: UpdateState;
+  busyAction: string | null;
+  onDownload: () => void;
+  onInstall: () => void;
+}) {
+  const ready = canInstallUpdate(updateState);
+  const available = canDownloadUpdate(updateState);
+  const actionLabel = ready ? (isWindows() ? 'Install Update' : 'Restart to Update') : 'Download Update';
+
+  return (
+    <div className="banner banner-info banner-action">
+      <span>
+        {ready
+          ? `Update ${updateState.latestVersion ?? ''} is ready to apply.`
+          : `Update ${updateState.latestVersion ?? ''} is available.`}
+      </span>
+      <button
+        type="button"
+        className="button button-secondary"
+        disabled={
+          busyAction === 'check-for-update' ||
+          busyAction === 'download-update' ||
+          busyAction === 'install-update'
+        }
+        onClick={ready ? onInstall : available ? onDownload : undefined}
+      >
+        {actionLabel}
+      </button>
     </div>
   );
 }
@@ -1617,6 +1878,65 @@ function onboardingStepTitle(step: OnboardingStep): string {
   }
 }
 
+function updateStatusLabel(status: UpdateState['status']): string {
+  switch (status) {
+    case 'idle':
+      return 'Idle';
+    case 'checking':
+      return 'Checking';
+    case 'available':
+      return 'Update available';
+    case 'downloading':
+      return 'Downloading';
+    case 'downloaded':
+      return 'Ready to install';
+    case 'installing':
+      return 'Installing';
+    case 'up_to_date':
+      return 'Up to date';
+    case 'error':
+      return 'Error';
+  }
+}
+
+function canDownloadUpdate(updateState: UpdateState): boolean {
+  return (
+    updateState.status === 'available' ||
+    (updateState.status === 'error' &&
+      Boolean(updateState.latestVersion) &&
+      !Boolean(updateState.downloadedBytes))
+  );
+}
+
+function canInstallUpdate(updateState: UpdateState): boolean {
+  return (
+    updateState.status === 'downloaded' ||
+    (updateState.status === 'error' && Boolean(updateState.downloadedBytes))
+  );
+}
+
+function formatUpdateProgress(updateState: UpdateState): string | null {
+  if (
+    (updateState.status !== 'downloading' && updateState.status !== 'downloaded') ||
+    updateState.downloadedBytes == null
+  ) {
+    return null;
+  }
+
+  if (updateState.contentLength == null || updateState.contentLength === 0) {
+    return formatByteSize(updateState.downloadedBytes);
+  }
+
+  const percent = Math.min(
+    100,
+    Math.round((updateState.downloadedBytes / updateState.contentLength) * 100)
+  );
+
+  return `${percent}% (${formatByteSize(updateState.downloadedBytes)} / ${formatByteSize(
+    updateState.contentLength
+  )})`;
+}
+
 function getDashboardNotice({
   setupComplete,
   duplicateGroups
@@ -1652,6 +1972,22 @@ function isRuntimeLocked(status: RuntimeState['status']): boolean {
 
 function isRuntimeLive(status: RuntimeState['status']): boolean {
   return status === 'starting' || status === 'running' || status === 'waiting_for_slippi';
+}
+
+function isWindows(): boolean {
+  return typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
+}
+
+function formatByteSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function meleeDraftFromConfig(melee: MeleeConfig): MeleeSettingsDraft {

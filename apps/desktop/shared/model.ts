@@ -204,6 +204,36 @@ export interface KeyboardTestState {
   lastError?: string | null;
 }
 
+export type UpdateStatus =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'downloaded'
+  | 'installing'
+  | 'up_to_date'
+  | 'error';
+
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  notes?: string | null;
+  publishedAt?: string | null;
+  target: string;
+}
+
+export interface UpdateState {
+  status: UpdateStatus;
+  currentVersion: string;
+  latestVersion?: string | null;
+  notes?: string | null;
+  publishedAt?: string | null;
+  target?: string | null;
+  downloadedBytes?: number | null;
+  contentLength?: number | null;
+  lastError?: string | null;
+}
+
 export interface InstallProfileResult {
   profilePath: string;
   pipesPath?: string | null;

@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/icon.png",
       "icons/128x128.png",
@@ -41,6 +42,17 @@
       "webviewInstallMode": {
         "type": "downloadBootstrapper",
         "silent": true
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU3NTYyQjA1RjkwOURBOTAKUldTUTJnbjVCU3RXVnpEcEJYS0hkK3hvZTQrYjQrcGdPY3lDNGlnck4rdGQrNFlTdDhXVUR2dnoK",
+      "endpoints": [
+        "https://github.com/arismoko/key-b0x/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }
