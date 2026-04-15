@@ -6,6 +6,8 @@ I made this because the other solutions typically require the user to fuss aroun
 
 I intend on adding Project M support/general dolphin support in the future but for now this is just targeting Slippi/Ishiiruka.
 
+![key-b0x desktop app dashboard](docs/assets/key-b0x-dashboard.png)
+
 The native stack is split into:
 
 - `crates/core`: pure B0XX state machine and snapshot generation
