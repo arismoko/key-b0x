@@ -285,13 +285,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "key-b0x-platform"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+]
+
+[[package]]
 name = "key-b0x-platform-linux"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "evdev",
+ "key-b0x-platform",
  "nix 0.30.1",
  "tempfile",
+]
+
+[[package]]
+name = "key-b0x-platform-windows"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "key-b0x-platform",
+ "windows-sys",
 ]
 
 [[package]]
@@ -301,9 +319,10 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs",
- "evdev",
  "key-b0x-core",
+ "key-b0x-platform",
  "key-b0x-platform-linux",
+ "key-b0x-platform-windows",
  "serde",
  "signal-hook",
  "tempfile",

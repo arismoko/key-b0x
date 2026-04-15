@@ -1,51 +1,6 @@
 use anyhow::Result;
 use key_b0x_core::ControllerSnapshot;
-use key_b0x_platform_linux::{ConnectionStatus, LinuxFifoTransport};
-use std::path::Path;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TransportStatus {
-    WaitingForReader,
-    Connected,
-    NewlyConnected,
-}
-
-impl From<ConnectionStatus> for TransportStatus {
-    fn from(value: ConnectionStatus) -> Self {
-        match value {
-            ConnectionStatus::WaitingForReader => TransportStatus::WaitingForReader,
-            ConnectionStatus::Connected => TransportStatus::Connected,
-            ConnectionStatus::NewlyConnected => TransportStatus::NewlyConnected,
-        }
-    }
-}
-
-pub trait SlippiTransport {
-    fn ensure_connected(&mut self) -> Result<TransportStatus>;
-    fn send_line(&mut self, line: &str) -> Result<TransportStatus>;
-}
-
-pub struct LinuxTransport {
-    inner: LinuxFifoTransport,
-}
-
-impl LinuxTransport {
-    pub fn new(slippi_user_path: &Path, port: u8) -> Result<Self> {
-        let inner = LinuxFifoTransport::new(slippi_user_path, port)?;
-        inner.ensure_fifo()?;
-        Ok(Self { inner })
-    }
-}
-
-impl SlippiTransport for LinuxTransport {
-    fn ensure_connected(&mut self) -> Result<TransportStatus> {
-        Ok(self.inner.ensure_connected()?.into())
-    }
-
-    fn send_line(&mut self, line: &str) -> Result<TransportStatus> {
-        Ok(self.inner.send_line(line)?.into())
-    }
-}
+use key_b0x_platform::{SlippiTransport, TransportStatus};
 
 pub struct SnapshotEmitter<T: SlippiTransport> {
     transport: T,

@@ -32,25 +32,39 @@ D-Pad/Left = Button D_LEFT
 D-Pad/Right = Button D_RIGHT
 "#;
 
-pub fn ensure_pipes_dir(slippi_user_path: &Path) -> Result<PathBuf> {
+pub struct InstallProfileResult {
+    pub profile_path: PathBuf,
+    pub pipes_path: Option<PathBuf>,
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_pipes_dir(slippi_user_path: &Path) -> Result<PathBuf> {
     let dir = slippi_user_path.join("Pipes");
     fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
     Ok(dir)
 }
 
-pub fn install_profile(slippi_user_path: &Path) -> Result<PathBuf> {
+pub fn install_profile(slippi_user_path: &Path) -> Result<InstallProfileResult> {
     let profile_dir = slippi_user_path
         .join("Config")
         .join("Profiles")
         .join("GCPad");
     fs::create_dir_all(&profile_dir)
         .with_context(|| format!("failed to create {}", profile_dir.display()))?;
-    ensure_pipes_dir(slippi_user_path)?;
+
+    #[cfg(target_os = "linux")]
+    let pipes_path = Some(ensure_pipes_dir(slippi_user_path)?);
+    #[cfg(not(target_os = "linux"))]
+    let pipes_path = None;
 
     let profile_path = profile_dir.join(PROFILE_NAME);
     fs::write(&profile_path, PROFILE_CONTENTS)
         .with_context(|| format!("failed to write {}", profile_path.display()))?;
-    Ok(profile_path)
+
+    Ok(InstallProfileResult {
+        profile_path,
+        pipes_path,
+    })
 }
 
 #[cfg(test)]
@@ -58,12 +72,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn install_profile_writes_profile_and_pipes_dir() {
+    fn install_profile_writes_profile_and_platform_layout() {
         let temp = tempfile::tempdir().unwrap();
-        let profile_path = install_profile(temp.path()).unwrap();
-        assert!(profile_path.exists());
-        assert!(temp.path().join("Pipes").is_dir());
-        let raw = fs::read_to_string(profile_path).unwrap();
+        let installed = install_profile(temp.path()).unwrap();
+        assert!(installed.profile_path.exists());
+        #[cfg(target_os = "linux")]
+        {
+            assert_eq!(installed.pipes_path, Some(temp.path().join("Pipes")));
+            assert!(temp.path().join("Pipes").is_dir());
+        }
+        let raw = fs::read_to_string(installed.profile_path).unwrap();
         assert!(raw.contains("Device = Pipe/0/slippibot1"));
     }
 }

@@ -1,11 +1,12 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use key_b0x_core::BindingId;
+use key_b0x_platform::{KeyboardId, NormalizedKey};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const CONFIG_VERSION: u8 = 1;
+const CONFIG_VERSION: u8 = 2;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppConfig {
@@ -14,13 +15,13 @@ pub struct AppConfig {
     #[serde(default = "default_slippi_user_path")]
     pub slippi_user_path: PathBuf,
     #[serde(default)]
-    pub keyboard_device: Option<PathBuf>,
+    pub keyboard_device: Option<KeyboardId>,
     #[serde(default = "default_exclusive_capture")]
     pub exclusive_capture: bool,
     #[serde(default = "default_port")]
     pub port: u8,
     #[serde(default = "default_bindings")]
-    pub bindings: BTreeMap<BindingId, String>,
+    pub bindings: BTreeMap<BindingId, NormalizedKey>,
 }
 
 impl Default for AppConfig {
@@ -42,7 +43,7 @@ impl AppConfig {
         for binding in BindingId::ALL {
             self.bindings
                 .entry(binding)
-                .or_insert_with(|| defaults.get(&binding).cloned().unwrap_or_default());
+                .or_insert_with(|| defaults.get(&binding).copied().unwrap_or(NormalizedKey::KeyA));
         }
 
         if self.port == 0 {
@@ -79,8 +80,19 @@ pub fn load_or_create(path: &Path) -> Result<AppConfig> {
 pub fn load(path: &Path) -> Result<AppConfig> {
     let raw = fs::read_to_string(path)
         .with_context(|| format!("failed to read config {}", path.display()))?;
-    let config: AppConfig =
+    let parsed: toml::Value =
         toml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))?;
+    let version = parsed.get("version").and_then(|value| value.as_integer()).unwrap_or(0);
+
+    if version != i64::from(CONFIG_VERSION) {
+        bail!(
+            "unsupported key-b0x config version {version} in {}; delete it and rerun `key-b0x-runtime print-default-config` to generate a v{CONFIG_VERSION} config",
+            path.display()
+        );
+    }
+
+    let config: AppConfig =
+        parsed.try_into().with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(config.normalize())
 }
 
@@ -116,37 +128,35 @@ fn default_port() -> u8 {
 }
 
 fn default_slippi_user_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
-        .join("SlippiOnline")
+    super::platform::default_slippi_user_dir()
 }
 
-fn default_bindings() -> BTreeMap<BindingId, String> {
+fn default_bindings() -> BTreeMap<BindingId, NormalizedKey> {
     BTreeMap::from([
-        (BindingId::AnalogUp, "KEY_RIGHTBRACE".to_string()),
-        (BindingId::AnalogDown, "KEY_3".to_string()),
-        (BindingId::AnalogLeft, "KEY_2".to_string()),
-        (BindingId::AnalogRight, "KEY_4".to_string()),
-        (BindingId::ModX, "KEY_V".to_string()),
-        (BindingId::ModY, "KEY_B".to_string()),
-        (BindingId::A, "KEY_M".to_string()),
-        (BindingId::B, "KEY_O".to_string()),
-        (BindingId::L, "KEY_Q".to_string()),
-        (BindingId::R, "KEY_9".to_string()),
-        (BindingId::X, "KEY_P".to_string()),
-        (BindingId::Y, "KEY_0".to_string()),
-        (BindingId::Z, "KEY_LEFTBRACE".to_string()),
-        (BindingId::CUp, "KEY_K".to_string()),
-        (BindingId::CDown, "KEY_SPACE".to_string()),
-        (BindingId::CLeft, "KEY_N".to_string()),
-        (BindingId::CRight, "KEY_COMMA".to_string()),
-        (BindingId::LightShield, "KEY_MINUS".to_string()),
-        (BindingId::MidShield, "KEY_EQUAL".to_string()),
-        (BindingId::Start, "KEY_7".to_string()),
-        (BindingId::DUp, "KEY_UP".to_string()),
-        (BindingId::DDown, "KEY_DOWN".to_string()),
-        (BindingId::DLeft, "KEY_LEFT".to_string()),
-        (BindingId::DRight, "KEY_RIGHT".to_string()),
+        (BindingId::AnalogUp, NormalizedKey::BracketRight),
+        (BindingId::AnalogDown, NormalizedKey::Digit3),
+        (BindingId::AnalogLeft, NormalizedKey::Digit2),
+        (BindingId::AnalogRight, NormalizedKey::Digit4),
+        (BindingId::ModX, NormalizedKey::KeyV),
+        (BindingId::ModY, NormalizedKey::KeyB),
+        (BindingId::A, NormalizedKey::KeyM),
+        (BindingId::B, NormalizedKey::KeyO),
+        (BindingId::L, NormalizedKey::KeyQ),
+        (BindingId::R, NormalizedKey::Digit9),
+        (BindingId::X, NormalizedKey::KeyP),
+        (BindingId::Y, NormalizedKey::Digit0),
+        (BindingId::Z, NormalizedKey::BracketLeft),
+        (BindingId::CUp, NormalizedKey::KeyK),
+        (BindingId::CDown, NormalizedKey::Space),
+        (BindingId::CLeft, NormalizedKey::KeyN),
+        (BindingId::CRight, NormalizedKey::Comma),
+        (BindingId::LightShield, NormalizedKey::Minus),
+        (BindingId::MidShield, NormalizedKey::Equal),
+        (BindingId::Start, NormalizedKey::Digit7),
+        (BindingId::DUp, NormalizedKey::ArrowUp),
+        (BindingId::DDown, NormalizedKey::ArrowDown),
+        (BindingId::DLeft, NormalizedKey::ArrowLeft),
+        (BindingId::DRight, NormalizedKey::ArrowRight),
     ])
 }
 
@@ -160,6 +170,7 @@ mod tests {
         assert_eq!(config.bindings.len(), BindingId::ALL.len());
         assert_eq!(config.port, 1);
         assert!(!config.exclusive_capture);
+        assert_eq!(config.bindings[&BindingId::AnalogUp], NormalizedKey::BracketRight);
     }
 
     #[test]
@@ -170,5 +181,27 @@ mod tests {
         let config = load_or_create(&config_path).unwrap();
         assert!(config_path.exists());
         assert_eq!(config.bindings.len(), BindingId::ALL.len());
+    }
+
+    #[test]
+    fn old_config_versions_are_rejected() {
+        let temp = tempfile::tempdir().unwrap();
+        let config_path = temp.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+version = 1
+slippi_user_path = "/tmp/SlippiOnline"
+exclusive_capture = false
+port = 1
+
+[bindings]
+analog_up = "KEY_RIGHTBRACE"
+"#,
+        )
+        .unwrap();
+
+        let error = load(&config_path).unwrap_err();
+        assert!(error.to_string().contains("unsupported key-b0x config version 1"));
     }
 }
