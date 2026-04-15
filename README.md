@@ -35,8 +35,6 @@ release runbook lives in [docs/releasing.md](docs/releasing.md).
 
 - Slippi user data defaults to `~/.config/SlippiOnline` on Linux and
   `%APPDATA%\Slippi Launcher\netplay\User` on Windows
-- The config format is now `v2` and stores normalized physical key codes such
-  as `BracketRight`, `Digit3`, `KeyV`, and `ArrowUp`
 - Linux creates `~/.config/SlippiOnline/Pipes/slippibot1` when the profile is
   installed
 - The installed profile lives at
