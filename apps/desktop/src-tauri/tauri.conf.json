@@ -36,6 +36,12 @@
     "targets": [
       "appimage",
       "nsis"
-    ]
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      }
+    }
   }
 }

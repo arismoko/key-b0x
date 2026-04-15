@@ -5,7 +5,13 @@ on:
   push:
     branches:
       - main
-      - migration/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -37,11 +43,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             build-essential \
             curl \
             file \
             libayatana-appindicator3-dev \
+            libfuse2 \
             libgtk-3-dev \
             librsvg2-dev \
             libssl-dev \
@@ -55,7 +62,7 @@ jobs:
         run: npm ci
 
       - name: Rust tests
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: Desktop typecheck
         working-directory: apps/desktop
@@ -63,4 +70,8 @@ jobs:
 
       - name: Desktop tests
         working-directory: apps/desktop
-        run: npm run test
+        run: npm run test -- --run
+
+      - name: Desktop renderer build sanity
+        working-directory: apps/desktop
+        run: npm run build:renderer
