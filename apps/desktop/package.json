@@ -2,39 +2,33 @@
   "name": "key-b0x-desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "Electron desktop app for key-b0x",
-  "main": "dist-electron/main.js",
+  "description": "Tauri desktop app for key-b0x",
   "scripts": {
-    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:main\" \"npm:dev:electron\"",
+    "dev": "tauri dev",
     "dev:renderer": "vite",
-    "dev:main": "tsup electron/main.ts electron/preload.ts --format cjs --external electron --out-dir dist-electron --target node20 --watch --silent",
-    "dev:electron": "wait-on tcp:5173 file:dist-electron/main.js && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electronmon .",
-    "build": "npm run build:renderer && npm run build:main",
+    "build": "tauri build",
     "build:renderer": "vite build",
-    "build:main": "tsup electron/main.ts electron/preload.ts --format cjs --external electron --out-dir dist-electron --target node20 --clean",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.6",
     "@fontsource/space-grotesk": "^5.2.7",
-    "@iarna/toml": "^2.2.5",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.0",
+    "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^24.5.2",
     "@types/react": "^18.3.24",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^5.0.4",
-    "concurrently": "^9.2.1",
-    "cross-env": "^10.1.0",
-    "electron": "^37.2.6",
-    "electronmon": "^2.0.3",
-    "tsup": "^8.5.0",
+    "jsdom": "^26.1.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.7",
-    "vitest": "^3.2.4",
-    "wait-on": "^8.0.5"
+    "vitest": "^3.2.4"
   }
 }

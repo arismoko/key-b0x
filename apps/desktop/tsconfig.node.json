@@ -2,15 +2,15 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],
-    "module": "CommonJS",
-    "moduleResolution": "Node",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
     "strict": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node", "electron"]
+    "types": ["node"]
   },
-  "include": ["electron", "shared"]
+  "include": ["vite.config.ts"]
 }

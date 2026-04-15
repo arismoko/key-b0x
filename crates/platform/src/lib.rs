@@ -151,7 +151,7 @@ impl FromStr for KeyboardId {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeyboardInfo {
     pub id: KeyboardId,
     pub name: String,

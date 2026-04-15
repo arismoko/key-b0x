@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const PROFILE_NAME: &str = "key-b0x.ini";
+pub const PROFILE_FILE_NAME: &str = "key-b0x.ini";
+pub const PIPE_TARGET_LABEL: &str = "Pipe/0/slippibot1";
+
 const PROFILE_CONTENTS: &str = r#"[Profile]
 Device = Pipe/0/slippibot1
 Buttons/A = Button A
@@ -32,6 +35,8 @@ D-Pad/Left = Button D_LEFT
 D-Pad/Right = Button D_RIGHT
 "#;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstallProfileResult {
     pub profile_path: PathBuf,
     pub pipes_path: Option<PathBuf>,
@@ -57,7 +62,7 @@ pub fn install_profile(slippi_user_path: &Path) -> Result<InstallProfileResult> 
     #[cfg(not(target_os = "linux"))]
     let pipes_path = None;
 
-    let profile_path = profile_dir.join(PROFILE_NAME);
+    let profile_path = profile_dir.join(PROFILE_FILE_NAME);
     fs::write(&profile_path, PROFILE_CONTENTS)
         .with_context(|| format!("failed to write {}", profile_path.display()))?;
 
@@ -65,6 +70,13 @@ pub fn install_profile(slippi_user_path: &Path) -> Result<InstallProfileResult> 
         profile_path,
         pipes_path,
     })
+}
+
+pub fn profile_looks_installed(profile_path: &Path) -> bool {
+    match fs::read_to_string(profile_path) {
+        Ok(raw) => raw.contains(&format!("Device = {PIPE_TARGET_LABEL}")),
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]

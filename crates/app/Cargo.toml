@@ -1,15 +1,15 @@
 [package]
-name = "key-b0x-runtime"
-version.workspace = true
+name = "key-b0x-app"
 edition.workspace = true
 license.workspace = true
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-clap.workspace = true
 dirs.workspace = true
 serde.workspace = true
-signal-hook.workspace = true
 toml.workspace = true
 key-b0x-core = { path = "../core" }
 key-b0x-platform = { path = "../platform" }

@@ -12,7 +12,7 @@ use key_b0x_platform_windows::{
 };
 
 #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-compile_error!("key-b0x-runtime currently supports only Linux and Windows");
+compile_error!("key-b0x currently supports only Linux and Windows");
 
 pub fn active_keyboard_backend() -> ActiveKeyboardBackend {
     ActiveKeyboardBackend::new()

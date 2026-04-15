@@ -1,0 +1,17 @@
+[package]
+name = "key-b0x-desktop-tauri"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+key-b0x-app = { path = "../../../crates/app" }
+serde.workspace = true
+tauri.workspace = true
+tauri-plugin-dialog = "2"

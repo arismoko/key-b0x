@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { api } from './api';
 import {
   BINDING_GROUPS,
   DEFAULT_BINDINGS,
@@ -142,15 +143,15 @@ function App() {
     async function bootstrap() {
       try {
         const [loadedConfig, loadedRuntimeState] = await Promise.all([
-          window.keyB0x.getConfig(),
-          window.keyB0x.getRuntimeState()
+          api.getConfig(),
+          api.getRuntimeState()
         ]);
 
         if (!mounted) {
           return;
         }
 
-        const setupStatus = await window.keyB0x.checkSetup();
+        const setupStatus = await api.checkSetup();
         if (!mounted) {
           return;
         }
@@ -175,7 +176,7 @@ function App() {
           setBusyAction('auto-start-runtime');
 
           try {
-            await window.keyB0x.startRuntime();
+            await api.startRuntime();
           } catch (error) {
             if (mounted) {
               setScreenError(messageFromError(error));
@@ -199,7 +200,7 @@ function App() {
 
     void bootstrap();
 
-    const unsubscribe = window.keyB0x.onRuntimeState((nextRuntimeState) => {
+    const unsubscribe = api.onRuntimeState((nextRuntimeState) => {
       setRuntime(nextRuntimeState);
       if (nextRuntimeState.status === 'error') {
         setAppView('dashboard');
@@ -346,7 +347,7 @@ function App() {
   }, [settingsOpen, appView, configurationReady, runtime.status]);
 
   async function refreshSetup() {
-    const nextSetup = await window.keyB0x.checkSetup();
+    const nextSetup = await api.checkSetup();
     setSetup(nextSetup);
     return nextSetup;
   }
@@ -356,7 +357,7 @@ function App() {
     setScreenError(null);
 
     try {
-      await window.keyB0x.startRuntime();
+      await api.startRuntime();
       setAppView('dashboard');
     } catch (error) {
       setScreenError(messageFromError(error));
@@ -383,7 +384,7 @@ function App() {
 
     try {
       const shouldRestartRuntime = isRuntimeLive(runtime.status);
-      const savedConfig = await window.keyB0x.saveConfig({
+      const savedConfig = await api.saveConfig({
         ...config,
         slippi_user_path: nextPath
       });
@@ -397,12 +398,12 @@ function App() {
           : cloneConfig(savedConfig)
       );
       setSlippiPathDraft(savedConfig.slippi_user_path);
-      await window.keyB0x.installProfile();
+      await api.installProfile();
       const nextSetup = await refreshSetup();
 
       if (shouldRestartRuntime) {
-        await window.keyB0x.stopRuntime();
-        await window.keyB0x.startRuntime();
+        await api.stopRuntime();
+        await api.startRuntime();
       }
 
       pushToast(pathChanged ? 'Updated.' : 'Installed.', 'success');
@@ -438,7 +439,7 @@ function App() {
         duplicateGroups.length === 0 &&
         (runtime.status === 'idle' || runtime.status === 'error');
 
-      const savedConfig = await window.keyB0x.saveConfig({
+      const savedConfig = await api.saveConfig({
         ...config,
         bindings: bindingDraft
       });
@@ -447,10 +448,10 @@ function App() {
       setBindingDraft({ ...savedConfig.bindings });
 
       if (shouldRestartRuntime) {
-        await window.keyB0x.stopRuntime();
-        await window.keyB0x.startRuntime();
+        await api.stopRuntime();
+        await api.startRuntime();
       } else if (shouldStartRuntime) {
-        await window.keyB0x.startRuntime();
+        await api.startRuntime();
       }
 
       pushToast('Bindings saved.', 'success');
@@ -482,7 +483,7 @@ function App() {
 
     try {
       const shouldRestartRuntime = isRuntimeLive(runtime.status);
-      const savedConfig = await window.keyB0x.saveConfig({
+      const savedConfig = await api.saveConfig({
         ...config,
         melee: meleeConfig
       });
@@ -498,8 +499,8 @@ function App() {
       setMeleeDraft(meleeDraftFromConfig(savedConfig.melee));
 
       if (shouldRestartRuntime) {
-        await window.keyB0x.stopRuntime();
-        await window.keyB0x.startRuntime();
+        await api.stopRuntime();
+        await api.startRuntime();
       }
 
       pushToast('Melee settings saved.', 'success');
@@ -517,7 +518,7 @@ function App() {
 
   async function handleBrowseSlippiPath() {
     try {
-      const pickedPath = await window.keyB0x.pickSlippiUserPath(slippiPathDraft);
+      const pickedPath = await api.pickSlippiUserPath(slippiPathDraft);
 
       if (pickedPath) {
         setSlippiPathDraft(pickedPath);
