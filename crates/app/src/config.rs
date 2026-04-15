@@ -14,6 +14,8 @@ pub struct AppConfig {
     pub version: u8,
     #[serde(default = "default_slippi_user_path")]
     pub slippi_user_path: PathBuf,
+    #[serde(default)]
+    pub onboarding_completed: bool,
     #[serde(default = "default_port")]
     pub port: u8,
     #[serde(default = "default_bindings")]
@@ -27,6 +29,7 @@ impl Default for AppConfig {
         Self {
             version: default_version(),
             slippi_user_path: default_slippi_user_path(),
+            onboarding_completed: false,
             port: default_port(),
             bindings: default_bindings(),
             melee: MeleeConfig::default(),
@@ -158,6 +161,7 @@ fn migrate_v1_config(parsed: toml::Value) -> Result<AppConfig> {
         slippi_user_path: legacy
             .slippi_user_path
             .unwrap_or_else(default_slippi_user_path),
+        onboarding_completed: false,
         port: legacy.port.unwrap_or_else(default_port),
         bindings: default_bindings(),
         melee: MeleeConfig::default(),
@@ -299,6 +303,7 @@ mod tests {
             NormalizedKey::BracketRight
         );
         assert_eq!(config.melee, MeleeConfig::default());
+        assert!(!config.onboarding_completed);
     }
 
     #[test]
@@ -402,6 +407,7 @@ d_right = "ArrowRight"
 
         let config = load(&config_path).unwrap();
         assert_eq!(config.melee, MeleeConfig::default());
+        assert!(!config.onboarding_completed);
     }
 
     #[test]

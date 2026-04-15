@@ -72,8 +72,8 @@ fn build_full_sync_lines(snapshot: &ControllerSnapshot) -> Vec<String> {
         snapshot.main_x, snapshot.main_y
     ));
     lines.push(format!("SET C {:.6} {:.6}", snapshot.c_x, snapshot.c_y));
-    lines.push(format!("SET L {:.6}", snapshot.l_analog));
-    lines.push(format!("SET R {:.6}", snapshot.r_analog));
+    lines.push(format!("SET L {:.6}", encode_trigger(snapshot.l_analog)));
+    lines.push(format!("SET R {:.6}", encode_trigger(snapshot.r_analog)));
     lines
 }
 
@@ -106,10 +106,10 @@ fn build_diff_lines(previous: &ControllerSnapshot, current: &ControllerSnapshot)
         lines.push(format!("SET C {:.6} {:.6}", current.c_x, current.c_y));
     }
     if axes_changed(previous.l_analog, current.l_analog) {
-        lines.push(format!("SET L {:.6}", current.l_analog));
+        lines.push(format!("SET L {:.6}", encode_trigger(current.l_analog)));
     }
     if axes_changed(previous.r_analog, current.r_analog) {
-        lines.push(format!("SET R {:.6}", current.r_analog));
+        lines.push(format!("SET R {:.6}", encode_trigger(current.r_analog)));
     }
 
     lines
@@ -117,6 +117,10 @@ fn build_diff_lines(previous: &ControllerSnapshot, current: &ControllerSnapshot)
 
 fn axes_changed(lhs: f64, rhs: f64) -> bool {
     (lhs - rhs).abs() > 1e-9
+}
+
+fn encode_trigger(value: f64) -> f64 {
+    (value.clamp(0.0, 1.0) * 2.0) - 1.0
 }
 
 #[cfg(test)]
@@ -203,6 +207,29 @@ mod tests {
         };
         emitter.emit(&second).unwrap();
         assert_eq!(emitter.transport.lines, vec!["PRESS B".to_string()]);
+    }
+
+    #[test]
+    fn full_sync_encodes_trigger_axes_for_pipe_protocol() {
+        let lines = build_full_sync_lines(&ControllerSnapshot {
+            l_analog: 49.0 / 255.0,
+            r_analog: 94.0 / 255.0,
+            ..ControllerSnapshot::neutral()
+        });
+
+        assert!(lines.contains(&format!(
+            "SET L {:.6}",
+            encode_trigger(49.0 / 255.0)
+        )));
+        assert!(lines.contains(&format!(
+            "SET R {:.6}",
+            encode_trigger(94.0 / 255.0)
+        )));
+    }
+
+    #[test]
+    fn neutral_trigger_encodes_to_negative_one() {
+        assert_eq!(encode_trigger(0.0), -1.0);
     }
 
     #[test]

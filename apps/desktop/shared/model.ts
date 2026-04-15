@@ -167,6 +167,7 @@ export const DEFAULT_MELEE_CONFIG: MeleeConfig = {
 export interface AppConfig {
   version: typeof CONFIG_VERSION;
   slippi_user_path: string;
+  onboarding_completed: boolean;
   port: typeof SUPPORTED_PORT;
   bindings: BindingMap;
   melee: MeleeConfig;

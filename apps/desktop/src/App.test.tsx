@@ -8,6 +8,7 @@ import App from './App';
 const defaultConfig: AppConfig = {
   version: 2,
   slippi_user_path: '/tmp/SlippiOnline',
+  onboarding_completed: false,
   port: 1,
   bindings: {
     analog_up: 'BracketRight',
@@ -139,7 +140,7 @@ describe('App', () => {
     expect(mockApi.startRuntime).not.toHaveBeenCalled();
   });
 
-  it('saves setup through the same onboarding flow', async () => {
+  it('advances to the controller instructions after saving setup', async () => {
     mockApi.checkSetup
       .mockResolvedValueOnce(incompleteSetup)
       .mockResolvedValueOnce(completeSetup);
@@ -157,12 +158,15 @@ describe('App', () => {
       });
     });
     expect(mockApi.installProfile).toHaveBeenCalledTimes(1);
-    await waitFor(() => {
-      expect(mockApi.startRuntime).toHaveBeenCalledTimes(1);
-    });
+    expect(await screen.findByText('Load Controller Profile')).toBeTruthy();
+    expect(mockApi.startRuntime).not.toHaveBeenCalled();
   });
 
   it('auto-starts the runtime on the dashboard when setup is complete', async () => {
+    mockApi.getConfig.mockResolvedValue({
+      ...structuredClone(defaultConfig),
+      onboarding_completed: true
+    });
     mockApi.checkSetup.mockResolvedValue(completeSetup);
 
     render(<App />);
@@ -174,6 +178,10 @@ describe('App', () => {
   });
 
   it('updates the visible runtime status from runtime events', async () => {
+    mockApi.getConfig.mockResolvedValue({
+      ...structuredClone(defaultConfig),
+      onboarding_completed: true
+    });
     mockApi.checkSetup.mockResolvedValue(completeSetup);
     mockApi.getRuntimeState.mockResolvedValue(runningRuntime);
 
@@ -190,5 +198,41 @@ describe('App', () => {
     });
 
     expect(screen.getByText('Waiting for Slippi')).toBeTruthy();
+  });
+
+  it('marks onboarding complete after the profile instructions step', async () => {
+    mockApi.checkSetup.mockResolvedValue(completeSetup);
+
+    render(<App />);
+
+    expect(await screen.findByText('Load Controller Profile')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() => {
+      expect(mockApi.saveConfig).toHaveBeenCalledWith({
+        ...defaultConfig,
+        onboarding_completed: true
+      });
+    });
+    await waitFor(() => {
+      expect(mockApi.startRuntime).toHaveBeenCalledTimes(1);
+    });
+    expect(await screen.findByRole('button', { name: 'Open settings' })).toBeTruthy();
+  });
+
+  it('lets the user go back to the path step from the profile instructions', async () => {
+    mockApi.checkSetup.mockResolvedValue(completeSetup);
+
+    render(<App />);
+
+    expect(await screen.findByText('Load Controller Profile')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(await screen.findByText('Detected Slippi Path')).toBeTruthy();
+    expect((screen.getByLabelText('Slippi User Path') as HTMLInputElement).value).toBe(
+      '/tmp/SlippiOnline'
+    );
   });
 });

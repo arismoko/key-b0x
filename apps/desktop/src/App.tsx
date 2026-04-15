@@ -22,6 +22,7 @@ import {
 } from '../shared/model';
 
 type AppView = 'onboarding' | 'dashboard';
+type OnboardingStep = 'path' | 'profile';
 type ToastTone = 'info' | 'success' | 'warning' | 'error';
 
 type Toast = {
@@ -122,6 +123,7 @@ const AIRDODGE_KIND_OPTIONS: SelectOption<MeleeSettingsDraft['airdodge_kind']>[]
 
 function App() {
   const [appView, setAppView] = useState<AppView>('onboarding');
+  const [onboardingStep, setOnboardingStep] = useState<OnboardingStep>('path');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [bindingDraft, setBindingDraft] = useState<BindingMap | null>(null);
@@ -156,7 +158,8 @@ function App() {
           return;
         }
 
-        const initialRoute = getInitialRoute(setupStatus);
+        const initialRoute = getInitialRoute(loadedConfig, setupStatus);
+        const initialOnboardingStep = getInitialOnboardingStep(loadedConfig, setupStatus);
 
         setConfig(cloneConfig(loadedConfig));
         setBindingDraft({ ...loadedConfig.bindings });
@@ -165,6 +168,7 @@ function App() {
         setRuntime(loadedRuntimeState);
         setSetup(setupStatus);
         setAppView(initialRoute);
+        setOnboardingStep(initialOnboardingStep);
 
         if (
           initialRoute === 'dashboard' &&
@@ -551,20 +555,62 @@ function App() {
     openSettings();
   }
 
-  async function goToNextStep() {
-    const setupReady = await handleApplySetup();
+  async function enterDashboardFromOnboarding() {
+    setCaptureTarget(null);
+    setSettingsOpen(false);
+    setOnboardingStep('path');
+    setAppView('dashboard');
 
-    if (!setupReady) {
+    if (bindingsReady && (runtime.status === 'idle' || runtime.status === 'error')) {
+      await startRuntimeForDashboard();
+    }
+  }
+
+  async function completeOnboarding() {
+    if (!config) {
       return;
     }
 
-    setCaptureTarget(null);
-    setSettingsOpen(false);
-    setAppView('dashboard');
+    setBusyAction('complete-onboarding');
+    setScreenError(null);
 
-    if (setupReady && bindingsReady && (runtime.status === 'idle' || runtime.status === 'error')) {
-      void startRuntimeForDashboard();
+    try {
+      const savedConfig = await api.saveConfig({
+        ...config,
+        onboarding_completed: true
+      });
+
+      setConfig(cloneConfig(savedConfig));
+      await enterDashboardFromOnboarding();
+    } catch (error) {
+      setScreenError(messageFromError(error));
+    } finally {
+      setBusyAction(null);
     }
+  }
+
+  async function goToNextStep() {
+    if (onboardingStep === 'path') {
+      const setupReady = await handleApplySetup();
+
+      if (!setupReady) {
+        return;
+      }
+
+      if (config?.onboarding_completed) {
+        await enterDashboardFromOnboarding();
+        return;
+      }
+
+      setOnboardingStep('profile');
+      return;
+    }
+
+    await completeOnboarding();
+  }
+
+  function goToPreviousStep() {
+    setOnboardingStep('path');
   }
 
   if (loading || !config || !bindingDraft || !meleeDraft || !setup) {
@@ -616,9 +662,15 @@ function App() {
             {screenError ? <div className="banner banner-error">{screenError}</div> : null}
 
             <div className="wizard-intro">
-              <h2>Detected Slippi Path</h2>
+              <div className="wizard-intro-copy">
+                <div className="section-eyebrow">
+                  {onboardingStep === 'path' ? 'Step 1 of 2' : 'Step 2 of 2'}
+                </div>
+                <h2>{onboardingStep === 'path' ? 'Detected Slippi Path' : 'Load Controller Profile'}</h2>
+              </div>
             </div>
 
+            {onboardingStep === 'path' ? (
               <SetupSection
                 busyAction={busyAction}
                 slippiPathDraft={slippiPathDraft}
@@ -626,16 +678,43 @@ function App() {
                 label="Path"
                 onBrowsePath={handleBrowseSlippiPath}
               />
+            ) : (
+              <div className="settings-card settings-card-setup">
+                <div className="settings-card-copy">
+                  <h3 className="settings-card-title">Dolphin / Ishiiruka Setup</h3>
+                  <p className="settings-card-description">
+                    Finish the controller setup in Dolphin or Ishiiruka before starting the runtime.
+                  </p>
+                </div>
+                <ol className="wizard-step-list">
+                  <li>Press the Controller button in Dolphin or Ishiiruka.</li>
+                  <li>Set Port 1 to Standard Controller.</li>
+                  <li>Select the key-b0x profile and press Load.</li>
+                </ol>
+                <p className="wizard-step-note">When that is done, press Next.</p>
+              </div>
+            )}
 
             <footer className="wizard-footer">
               <div className="wizard-actions">
+                {onboardingStep === 'profile' ? (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={busyAction === 'complete-onboarding'}
+                    onClick={goToPreviousStep}
+                  >
+                    Back
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="button button-primary"
                   disabled={
                     runtimeLocked ||
                     busyAction === 'apply-setup' ||
-                    slippiPathDraft.trim().length === 0
+                    busyAction === 'complete-onboarding' ||
+                    (onboardingStep === 'path' && slippiPathDraft.trim().length === 0)
                   }
                   onClick={goToNextStep}
                 >
@@ -1192,12 +1271,20 @@ function duplicateMessage(conflict: { key: NormalizedKey; bindings: BindingId[] 
   return `${formatKeyLabel(conflict.key)} is assigned to ${bindingNames}.`;
 }
 
-function getInitialRoute(
-  setup: SetupStatus
-): AppView {
+function getInitialRoute(config: AppConfig, setup: SetupStatus): AppView {
   const setupComplete = setup.slippiFound && setup.profileInstalled;
 
-  return setupComplete ? 'dashboard' : 'onboarding';
+  return setupComplete && config.onboarding_completed ? 'dashboard' : 'onboarding';
+}
+
+function getInitialOnboardingStep(config: AppConfig, setup: SetupStatus): OnboardingStep {
+  const setupComplete = setup.slippiFound && setup.profileInstalled;
+
+  if (!setupComplete) {
+    return 'path';
+  }
+
+  return config.onboarding_completed ? 'path' : 'profile';
 }
 
 function getDashboardNotice({
