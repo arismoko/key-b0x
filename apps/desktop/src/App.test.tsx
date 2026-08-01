@@ -246,6 +246,27 @@ describe('App', () => {
     });
   });
 
+  it('explains the held-direction tradeoff in SOCD settings', async () => {
+    mockApi.getConfig.mockResolvedValue({
+      ...structuredClone(defaultConfig),
+      onboarding_completed: true
+    });
+    mockApi.checkSetup.mockResolvedValue(completeSetup);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }));
+    const socdGroup = await screen.findByRole('group', { name: 'SOCD Mode' });
+
+    expect(within(socdGroup).getByText('2IP No Reactivation')).toBeTruthy();
+    expect(within(socdGroup).getByText('2IP Reactivation')).toBeTruthy();
+    expect(
+      within(socdGroup).getByText(
+        'Release the newer opposite direction: return to the direction still held'
+      )
+    ).toBeTruthy();
+  });
+
   it('updates the visible runtime status from runtime events', async () => {
     mockApi.getConfig.mockResolvedValue({
       ...structuredClone(defaultConfig),
@@ -267,7 +288,11 @@ describe('App', () => {
     });
 
     expect(screen.getByText('Waiting for Slippi')).toBeTruthy();
-    expect(screen.getByText('Try restarting Slippi/Dolphin.')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'In Slippi/Dolphin, set Port 1 to Standard Controller and load the key-b0x profile. Then restart Slippi if it still does not connect.'
+      )
+    ).toBeTruthy();
   });
 
   it('shows a dashboard update banner when an update is available', async () => {

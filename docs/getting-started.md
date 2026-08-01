@@ -62,7 +62,19 @@ default.
 
 ### key-b0x says it is waiting for Slippi
 
-Start Slippi or restart Slippi / Dolphin so the pipe backend is available.
+In Slippi / Dolphin, open the controller settings, set Port 1 to `Standard
+Controller`, select the `key-b0x` profile, and press `Load`. Restart Slippi /
+Dolphin if key-b0x still does not connect.
+
+### The Linux AppImage aborts with a GBM EGL display error
+
+Current AppImage builds automatically disable WebKit's DMA-BUF renderer, which
+avoids the known startup failure on some NVIDIA / Wayland systems. For older
+builds, use this workaround:
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./key-b0x_*.AppImage
+```
 
 ### The wrong Slippi folder was detected
 
@@ -74,6 +86,19 @@ manually.
 Use the keyboard test. If the test does not show all held keys together,
 `key-b0x` cannot fix that in software. You will need a keyboard with better key
 rollover.
+
+### A held direction stops until I press it again
+
+The default `2IP No Reactivation` SOCD mode follows B0XX Melee behavior. If you
+hold one direction, press its opposite, and then release the newer direction,
+the output intentionally stays neutral until you release and press the original
+direction again. The keyboard test still shows the raw held key, which can make
+this feel like a dropped input.
+
+For keyboard-like holds, open Settings, find `SOCD Mode`, choose `2IP
+Reactivation`, and save the Melee settings. Then releasing the newer opposite
+direction returns to the direction you are still holding. Check the rules for
+your tournament before changing SOCD behavior.
 
 ### Linux updates are not applying cleanly
 

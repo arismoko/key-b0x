@@ -1,7 +1,7 @@
 {
   "name": "key-b0x-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tauri desktop app for key-b0x",
   "scripts": {
     "dev": "tauri dev",
