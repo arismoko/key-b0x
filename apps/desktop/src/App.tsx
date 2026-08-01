@@ -77,13 +77,13 @@ const SOCD_MODE_OPTIONS: SelectOption<SocdMode>[] = [
   {
     value: 'second_input_priority_no_reactivation',
     label: '2IP No Reactivation',
-    detail: 'Latest input wins without reactivation',
+    detail: 'Release the newer opposite direction: stay neutral until the held direction is re-pressed',
     tag: 'Default'
   },
   {
     value: 'second_input_priority',
-    label: '2IP',
-    detail: 'Latest input wins'
+    label: '2IP Reactivation',
+    detail: 'Release the newer opposite direction: return to the direction still held'
   },
   {
     value: 'neutral',
@@ -1189,7 +1189,7 @@ function MeleeSettingsSection({
     <div className="settings-stack">
       <SettingChoiceGroup
         label="SOCD Mode"
-        description="Applies the same SOCD rule to main stick and C-stick axes for now."
+        description="Controls overlapping opposite directions. The default matches B0XX Melee behavior; use reactivation for keyboard-like holds."
         value={meleeDraft.socd_mode}
         options={SOCD_MODE_OPTIONS}
         disabled={disabled}
@@ -1768,7 +1768,8 @@ function ToastViewport({
     runtimeStatus === 'waiting_for_slippi'
       ? {
           id: WAITING_FOR_SLIPPI_TOAST_ID,
-          message: 'Try restarting Slippi/Dolphin.',
+          message:
+            'In Slippi/Dolphin, set Port 1 to Standard Controller and load the key-b0x profile. Then restart Slippi if it still does not connect.',
           tone: 'warning' as const,
           persistent: true
         }

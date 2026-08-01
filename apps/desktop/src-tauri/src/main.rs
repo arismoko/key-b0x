@@ -345,6 +345,9 @@ async fn install_update(app: AppHandle, state: State<'_, AppState>) -> Result<()
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    configure_linux_appimage_webview();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -399,6 +402,26 @@ fn main() {
                 let _ = service.shutdown();
             }
         });
+}
+
+#[cfg(target_os = "linux")]
+fn configure_linux_appimage_webview() {
+    let is_appimage =
+        std::env::var_os("APPIMAGE").is_some() || std::env::var_os("APPDIR").is_some();
+    let renderer_override_present = std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_some();
+
+    if should_disable_dmabuf_renderer(is_appimage, renderer_override_present) {
+        // SAFETY: this runs at the start of main, before Tauri, WebKit, or any
+        // application worker thread is created.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn should_disable_dmabuf_renderer(is_appimage: bool, renderer_override_present: bool) -> bool {
+    is_appimage && !renderer_override_present
 }
 
 fn with_service<T>(
@@ -506,4 +529,24 @@ fn friendly_install_error(message: String) -> String {
 
 fn string_error(error: anyhow::Error) -> String {
     error.to_string()
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::should_disable_dmabuf_renderer;
+
+    #[test]
+    fn appimage_disables_dmabuf_renderer_by_default() {
+        assert!(should_disable_dmabuf_renderer(true, false));
+    }
+
+    #[test]
+    fn explicit_renderer_setting_is_preserved() {
+        assert!(!should_disable_dmabuf_renderer(true, true));
+    }
+
+    #[test]
+    fn non_appimage_build_keeps_webkit_default() {
+        assert!(!should_disable_dmabuf_renderer(false, false));
+    }
 }
